@@ -15,10 +15,12 @@ This is the training-side companion to the [LLM-Inference-Handbook](https://gith
 ## Contents
 
 **Part I: The map**
+
 1. [What "training" means in 2026: the full pipeline](#1-what-training-means-in-2026-the-full-pipeline)
 2. [The economics: what training actually costs](#2-the-economics-what-training-actually-costs)
 
 **Part II: Pretraining**
+
 3. [Data engineering: the FineWeb school](#3-data-engineering-the-fineweb-school)
 4. [Tokenizers, and the Arabic tokenization tax](#4-tokenizers-and-the-arabic-tokenization-tax)
 5. [Scaling laws, budgets, and the ablation game](#5-scaling-laws-budgets-and-the-ablation-game)
@@ -30,15 +32,18 @@ This is the training-side companion to the [LLM-Inference-Handbook](https://gith
 11. [Hardware reliability: a failure every three hours](#11-hardware-reliability-a-failure-every-three-hours)
 
 **Part III: Mid-training and adaptation**
+
 12. [Mid-training: annealing, curricula, and long context](#12-mid-training-annealing-curricula-and-long-context)
 13. [Continued pretraining and new-language adaptation: the Arabic deep dive](#13-continued-pretraining-and-new-language-adaptation-the-arabic-deep-dive)
 
 **Part IV: Post-training**
+
 14. [SFT that actually works](#14-sft-that-actually-works)
 15. [Preference optimization, and the sycophancy incident](#15-preference-optimization-and-the-sycophancy-incident)
 16. [RL for reasoning: GRPO, RLVR, and the R1 pipeline](#16-rl-for-reasoning-grpo-rlvr-and-the-r1-pipeline)
 
 **Part V: The practitioner's track**
+
 17. [Fine-tuning without a cluster: LoRA, full FT, and the decision tree](#17-fine-tuning-without-a-cluster-lora-full-ft-and-the-decision-tree)
 18. [Evaluation during training](#18-evaluation-during-training)
 19. [The war-stories index and pre-flight checklists](#19-the-war-stories-index-and-pre-flight-checklists)
@@ -367,7 +372,7 @@ The organizational arc of the logbook is as instructive as the technical one: th
 
 ### 11.3 Designing for failure: the checklist
 
-- **Checkpoint cadence by expected-loss math.** With mean time between failures $M$ and checkpoint interval $T$, expected lost work per failure ≈ $T/2$; total overhead ≈ (write time)/$T$ + $T/(2M)$, minimized around $T \approx \sqrt{2 \cdot M \cdot t_{write}}$. With Llama-3-like $M \approx 3$h and a 5-minute write, that lands near every 30-45 minutes. Fast NVMe checkpointing (Sec. 10.3) moves the optimum toward more frequent saves.
+- **Checkpoint cadence by expected-loss math.** With mean time between failures $M$ and checkpoint interval $T$, expected lost work per failure ≈ $T/2$; total overhead ≈ (write time) / $T$ + $T/(2M)$, minimized around $T \approx \sqrt{2 \cdot M \cdot t_{write}}$. With Llama-3-like $M \approx 3$ h and a 5-minute write, that lands near every 30-45 minutes. Fast NVMe checkpointing (Sec. 10.3) moves the optimum toward more frequent saves.
 - **Spares in the pool.** BLOOM ran 48 nodes with 4 hot-spare nodes; OPT maintained a replenished buffer pool. Budget spare capacity from day one; sourcing replacement nodes mid-run is how you lose a week.
 - **Health-gate before resume.** OPT's restarts included diagnostic sweeps to eject bad nodes before rejoining; resuming onto a half-broken node just schedules the next failure.
 - **Automate detection → drain → restart → notify.** The bar demonstrated publicly (K2-V2's auto-detected spike with auto-restart and a Slack ping; Llama 3's 3-of-419 manual interventions) is achievable with unglamorous glue code.
