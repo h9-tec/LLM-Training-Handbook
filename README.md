@@ -91,7 +91,7 @@ released model  (base, instruct, and reasoning variants)
 
 **Terminology.**
 
-- **Pretraining** is self-supervised next-token prediction on a very large corpus. The objective for a sequence of tokens $x_1..x_T$ is the cross-entropy $\mathcal{L} = -\sum_t \log p_\theta(x_t \mid x_{<t})$. It consumes more than 95% of the FLOPs and produces a *base model*: a text-completion model with broad knowledge and no conversational behavior.
+- **Pretraining** is self-supervised next-token prediction on a very large corpus. The objective for a sequence of tokens $x_1..x_T$ is the cross-entropy $\mathcal{L} = -\sum_t \log p_\theta(x_t \mid x_{\lt t})$. It consumes more than 95% of the FLOPs and produces a *base model*: a text-completion model with broad knowledge and no conversational behavior.
 - **Mid-training** (also called *annealing*, or stage-2 and stage-3 pretraining) is a later refinement: the last portion of pretraining runs on a deliberately upgraded data mixture (more STEM, code, mathematics, and long documents) while the learning rate decays. Qwen3 formalizes it as three explicit stages: more than 30T general tokens at 4K context, then roughly 5T knowledge-intensive tokens, then a long-context stage extending to 32K. OLMo 2 similarly restarts from the pretrained checkpoint on domain-specific mixtures with the learning rate driven linearly to zero. A large share of benchmark performance is gained in this stage at low cost.
 - **Long-context extension** usually happens in the same stage: a short additional run on longer sequences, often combined with RoPE rescaling methods such as YaRN. Kimi K2 trained 400B annealing tokens at 4K and only 60B at 32K, then used YaRN to reach 128K. Long context is obtained with a small fraction of total tokens.
 - **Supervised fine-tuning (SFT)** teaches the base model the *format and behavior* of an assistant by imitating curated prompt-response pairs, with the loss masked to the response tokens.
@@ -1110,7 +1110,7 @@ Group Relative Policy Optimization (introduced in DeepSeekMath and widely adopte
 The objective, as given in DeepSeekMath, for a question $q$ and a group of outputs $o_1..o_G$ sampled from the old policy:
 
 ```math
-J(\theta) = \mathbb{E}\left[\frac{1}{G}\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\min\left(\rho_{i,t}A_i,\ \mathrm{clip}(\rho_{i,t},\,1-\epsilon,\,1+\epsilon)\,A_i\right) - \beta\,\mathrm{KL}\left(\pi_\theta \,\|\, \pi_{ref}\right)\right],\qquad \rho_{i,t} = \frac{\pi_\theta(o_{i,t}\mid q, o_{i,<t})}{\pi_{old}(o_{i,t}\mid q, o_{i,<t})}
+J(\theta) = \mathbb{E}\left[\frac{1}{G}\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\min\left(\rho_{i,t}A_i,\ \mathrm{clip}(\rho_{i,t},\,1-\epsilon,\,1+\epsilon)\,A_i\right) - \beta\,\mathrm{KL}\left(\pi_\theta \,\|\, \pi_{ref}\right)\right],\qquad \rho_{i,t} = \frac{\pi_\theta(o_{i,t}\mid q, o_{i,\lt t})}{\pi_{old}(o_{i,t}\mid q, o_{i,\lt t})}
 ```
 
 **Worked example.** Eight responses are sampled for one problem, and two are correct, so the rewards are [1, 0, 0, 1, 0, 0, 0, 0]. The group mean is 0.25 and the standard deviation is 0.433. Each correct response receives an advantage of $(1 - 0.25)/0.433 = +1.73$, and each incorrect response receives $-0.58$. Every token of a response shares that response's advantage. If all eight responses are correct, or all eight are wrong, the standard deviation is zero and every advantage is zero: the prompt contributes no gradient. As training progresses and more prompts become fully solved, a growing share of each batch is wasted in this way.
