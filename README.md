@@ -1,106 +1,115 @@
 # LLM Training Handbook
 
-**How large language models actually get trained: the mechanisms, the economics, and what really happens when thousands of GPUs run for weeks.**
+**A technical reference on how large language models are trained: the mechanisms, the economics, and the operational record of large-scale training runs.**
 
-Most training tutorials teach you the loss function and stop there. This handbook is built the other way around: every chapter is anchored in **documented, real training runs**, the OPT-175B logbook, the Llama 3.1 405B reliability report, DeepSeek-V3's FP8 recipe, Kimi K2's zero-spike run, OLMo 2's stability investigation, Hugging Face's SmolLM3 restart-after-1T-tokens story, the Tulu 3 and DeepSeek-R1 post-training pipelines, and the Arabic adaptation literature (Jais, AceGPT, ALLaM, Kuwain). The goal is that after reading it, a training log, a technical report, or a divergence at 3am all look familiar to you.
+Most training tutorials stop at the loss function. This handbook takes the opposite approach: every chapter is anchored in **documented training runs**, including the OPT-175B logbook, the Llama 3.1 405B reliability data, DeepSeek-V3's FP8 recipe, Kimi K2's run without loss spikes, OLMo 2's stability investigation, SmolLM3's restart after one trillion tokens, the Tulu 3 and DeepSeek-R1 post-training pipelines, and the Arabic adaptation literature (Jais, AceGPT, ALLaM, Kuwain). A reader who finishes it should be able to read a training log or a technical report critically, and to recognize a divergence, a throughput regression, or a contaminated evaluation from its signature.
 
-This is the training-side companion to the [LLM-Inference-Handbook](https://github.com/h9-tec/LLM-Inference-Handbook) and the [LLM-Math-Handbook](https://github.com/h9-tec/LLM-Math-Handbook). Inference asks "how do we serve this model cheaply?"; this book asks "how did this model come to exist, and what broke along the way?"
+It is the training-side companion to the [LLM-Inference-Handbook](https://github.com/h9-tec/LLM-Inference-Handbook) and the [LLM-Math-Handbook](https://github.com/h9-tec/LLM-Math-Handbook). The inference handbook covers how a model is served economically. This one covers how the model came to exist and what failed along the way.
 
-**Who it's for:** ML engineers, infra engineers, and technical leads who train, fine-tune, or adapt LLMs, or who need to read training reports critically. Interview candidates for training and infrastructure roles will find the standard questions covered with real numbers.
+**Audience.** ML engineers, infrastructure engineers, and technical leads who train, fine-tune, or adapt LLMs, or who need to evaluate training reports. Candidates preparing for training and infrastructure interviews will find the standard questions covered with real numbers.
 
-**You need:** nothing to install. Comfort with basic ML and transformer concepts helps. Arabic-specific sections assume no prior Arabic NLP knowledge.
+**Prerequisites.** Nothing to install. Familiarity with basic machine learning and the transformer architecture is assumed. The Arabic-specific sections assume no prior knowledge of Arabic NLP.
+
+**Conventions.** Figures are quoted from the cited reports. Where a figure is derived here, the text says so and shows the arithmetic. Each chapter ends with a linked reference list, and cross-references use chapter (Ch.) and section (Sec.) numbers.
 
 ---
 
 ## Contents
 
-**Part I: The map**
+**Part I: The Map**
 
-1. [What "training" means in 2026: the full pipeline](#1-what-training-means-in-2026-the-full-pipeline)
-2. [The economics: what training actually costs](#2-the-economics-what-training-actually-costs)
+1. [What "Training" Means in 2026: The Full Pipeline](#1-what-training-means-in-2026-the-full-pipeline)
+2. [The Economics of Training](#2-the-economics-of-training)
 
 **Part II: Pretraining**
 
-3. [Data engineering: the FineWeb school](#3-data-engineering-the-fineweb-school)
-4. [Tokenizers, and the Arabic tokenization tax](#4-tokenizers-and-the-arabic-tokenization-tax)
-5. [Scaling laws, budgets, and the ablation game](#5-scaling-laws-budgets-and-the-ablation-game)
-6. [Architecture choices that are really training choices](#6-architecture-choices-that-are-really-training-choices)
-7. [Optimizers, schedules, and hyperparameters that matter](#7-optimizers-schedules-and-hyperparameters-that-matter)
-8. [Stability: the physics of loss spikes](#8-stability-the-physics-of-loss-spikes)
-9. [Numerics: FP16 pain, BF16 peace, FP8 frontier](#9-numerics-fp16-pain-bf16-peace-fp8-frontier)
-10. [Distributed training: the parallelism zoo and real MFU](#10-distributed-training-the-parallelism-zoo-and-real-mfu)
-11. [Hardware reliability: a failure every three hours](#11-hardware-reliability-a-failure-every-three-hours)
+3. [Data Engineering: The FineWeb Methodology](#3-data-engineering-the-fineweb-methodology)
+4. [Tokenizers and the Arabic Tokenization Tax](#4-tokenizers-and-the-arabic-tokenization-tax)
+5. [Scaling Laws, Budgets, and Ablation Methodology](#5-scaling-laws-budgets-and-ablation-methodology)
+6. [Architecture Choices as Training Decisions](#6-architecture-choices-as-training-decisions)
+7. [Optimizers, Schedules, and Hyperparameters](#7-optimizers-schedules-and-hyperparameters)
+8. [Training Stability: Loss-Spike Mechanisms and Mitigations](#8-training-stability-loss-spike-mechanisms-and-mitigations)
+9. [Numerical Precision: FP16, BF16, and FP8](#9-numerical-precision-fp16-bf16-and-fp8)
+10. [Distributed Training: Parallelism Strategies and Measured MFU](#10-distributed-training-parallelism-strategies-and-measured-mfu)
+11. [Hardware Reliability at Scale](#11-hardware-reliability-at-scale)
 
-**Part III: Mid-training and adaptation**
+**Part III: Mid-Training and Adaptation**
 
-12. [Mid-training: annealing, curricula, and long context](#12-mid-training-annealing-curricula-and-long-context)
-13. [Continued pretraining and new-language adaptation: the Arabic deep dive](#13-continued-pretraining-and-new-language-adaptation-the-arabic-deep-dive)
+12. [Mid-Training: Annealing, Curricula, and Long Context](#12-mid-training-annealing-curricula-and-long-context)
+13. [Continued Pretraining and New-Language Adaptation: The Arabic Case](#13-continued-pretraining-and-new-language-adaptation-the-arabic-case)
 
-**Part IV: Post-training**
+**Part IV: Post-Training**
 
-14. [SFT that actually works](#14-sft-that-actually-works)
-15. [Preference optimization, and the sycophancy incident](#15-preference-optimization-and-the-sycophancy-incident)
-16. [RL for reasoning: GRPO, RLVR, and the R1 pipeline](#16-rl-for-reasoning-grpo-rlvr-and-the-r1-pipeline)
+14. [Supervised Fine-Tuning](#14-supervised-fine-tuning)
+15. [Preference Optimization and the GPT-4o Sycophancy Incident](#15-preference-optimization-and-the-gpt-4o-sycophancy-incident)
+16. [RL for Reasoning: GRPO, RLVR, and the R1 Pipeline](#16-rl-for-reasoning-grpo-rlvr-and-the-r1-pipeline)
 
-**Part V: The practitioner's track**
+**Part V: The Practitioner's Track**
 
-17. [Fine-tuning without a cluster: LoRA, full FT, and the decision tree](#17-fine-tuning-without-a-cluster-lora-full-ft-and-the-decision-tree)
-18. [Evaluation during training](#18-evaluation-during-training)
-19. [The war-stories index and pre-flight checklists](#19-the-war-stories-index-and-pre-flight-checklists)
-20. [Sources and further reading](#20-sources-and-further-reading)
+17. [Fine-Tuning Without a Cluster: LoRA, Full Fine-Tuning, and a Decision Procedure](#17-fine-tuning-without-a-cluster-lora-full-fine-tuning-and-a-decision-procedure)
+18. [Evaluation During Training](#18-evaluation-during-training)
+19. [Incident Index and Pre-Flight Checklists](#19-incident-index-and-pre-flight-checklists)
+20. [Sources and Further Reading](#20-sources-and-further-reading)
 
 ---
 
-# Part I: The map
+# Part I: The Map
 
-## 1. What "training" means in 2026: the full pipeline
+## 1. What "Training" Means in 2026: The Full Pipeline
 
-When a lab says "we trained a model," they mean a pipeline with four to six distinct phases, each with its own data, hyperparameters, failure modes, and team. Collapsing them into one word is the single most common source of confusion when reading technical reports.
+When a laboratory reports that it "trained a model," the statement covers a pipeline of four to six distinct phases, each with its own data, hyperparameters, failure modes, and often its own team. Treating these phases as one activity is the most common source of confusion when reading technical reports.
 
 ```
 raw web + curated sources
         |
         v
-[ Data engineering ]  -> filtering, dedup, classification, mixing   (Ch. 3)
+[ Data engineering ]   filtering, deduplication, classification, mixing      Ch. 3
         |
         v
-[ Pretraining ]       -> next-token prediction on trillions of tokens (Ch. 5-11)
+[ Pretraining ]        next-token prediction on trillions of tokens          Ch. 4-11
         |
         v
-[ Mid-training ]      -> annealing on high-quality mixes, curriculum
-                         shifts, long-context extension               (Ch. 12)
+[ Mid-training ]       annealing on high-quality mixtures, curriculum
+                       shifts, long-context extension                        Ch. 12
         |
         v
 [ Post-training ]
-    SFT               -> imitate curated demonstrations               (Ch. 14)
-    Preference (DPO/RLHF) -> optimize toward human/AI preferences     (Ch. 15)
-    RL / RLVR         -> optimize verifiable or judged outcomes       (Ch. 16)
+    SFT                imitate curated demonstrations                        Ch. 14
+    Preference         optimize toward human or AI preferences (DPO, RLHF)   Ch. 15
+    RL / RLVR          optimize verifiable or judged outcomes                Ch. 16
         |
         v
-released model  (base + instruct/thinking variants)
+released model  (base, instruct, and reasoning variants)
 ```
 
-**The vocabulary, precisely:**
+**Terminology.**
 
-- **Pretraining** is self-supervised next-token prediction on a huge corpus. The objective for a sequence of tokens $x_1..x_T$ is the cross-entropy $\mathcal{L} = -\sum_t \log p_\theta(x_t \mid x_{<t})$. It consumes 95%+ of the FLOPs and produces a *base model*: a text-completion engine with broad knowledge but no conversational behavior.
-- **Mid-training** (also called *annealing* or *stage-2/3 pretraining*) is the modern refinement: the last portion of pretraining is run on a deliberately upgraded data mixture (more STEM, code, math, long documents) while the learning rate decays. Qwen3 formalizes this as three explicit stages: over 30T general tokens at 4K context, then roughly 5T knowledge-intensive tokens, then a long-context stage extending to 32K. OLMo 2 similarly restarts from the pretrained checkpoint on domain-specific mixtures with the learning rate driven linearly to zero. This stage is where a lot of benchmark performance is actually won, cheaply.
-- **Long-context extension** usually happens here too: a short additional run on longer sequences, often with RoPE rescaling tricks like YaRN. Kimi K2 trained 400B annealing tokens at 4K and only 60B at 32K, then used YaRN to reach 128K. Long context is bought with a tiny fraction of total tokens.
-- **SFT (supervised fine-tuning)** teaches the base model the *format and behavior* of an assistant by imitating curated prompt-response pairs, with loss masked to the response tokens.
-- **Preference optimization** (RLHF with PPO, or the direct methods: DPO and its variants) pushes the model toward outputs humans (or AI judges) prefer between alternatives.
-- **RL with verifiable rewards (RLVR)** and reasoning RL (GRPO and friends) optimize the model against programmatic checkers (math answers, unit tests, format validators) rather than learned reward models. This is the engine behind the reasoning-model wave started by DeepSeek-R1.
+- **Pretraining** is self-supervised next-token prediction on a very large corpus. The objective for a sequence of tokens $x_1..x_T$ is the cross-entropy $\mathcal{L} = -\sum_t \log p_\theta(x_t \mid x_{<t})$. It consumes more than 95% of the FLOPs and produces a *base model*: a text-completion model with broad knowledge and no conversational behavior.
+- **Mid-training** (also called *annealing*, or stage-2 and stage-3 pretraining) is a later refinement: the last portion of pretraining runs on a deliberately upgraded data mixture (more STEM, code, mathematics, and long documents) while the learning rate decays. Qwen3 formalizes it as three explicit stages: more than 30T general tokens at 4K context, then roughly 5T knowledge-intensive tokens, then a long-context stage extending to 32K. OLMo 2 similarly restarts from the pretrained checkpoint on domain-specific mixtures with the learning rate driven linearly to zero. A large share of benchmark performance is gained in this stage at low cost.
+- **Long-context extension** usually happens in the same stage: a short additional run on longer sequences, often combined with RoPE rescaling methods such as YaRN. Kimi K2 trained 400B annealing tokens at 4K and only 60B at 32K, then used YaRN to reach 128K. Long context is obtained with a small fraction of total tokens.
+- **Supervised fine-tuning (SFT)** teaches the base model the *format and behavior* of an assistant by imitating curated prompt-response pairs, with the loss masked to the response tokens.
+- **Preference optimization** (RLHF with PPO, or the direct methods: DPO and its variants) moves the model toward the outputs that humans or AI judges prefer among alternatives.
+- **RL with verifiable rewards (RLVR)** and reasoning RL (GRPO and related algorithms) optimize the model against programmatic checkers (mathematical answers, unit tests, format validators) instead of learned reward models. This is the mechanism behind the reasoning models that followed DeepSeek-R1.
 
-**Who actually does which phase.** Very few organizations pretrain from scratch; the honest first question in Hugging Face's Smol Training Playbook is whether you should train at all, given how strong open bases (Qwen, Llama, Gemma, DeepSeek) already are. The realistic map:
+**Who runs which phase.** Very few organizations pretrain from scratch. The first question posed by Hugging Face's Smol Training Playbook is whether to train at all, given the strength of the available open base models (Qwen, Llama, Gemma, DeepSeek). A realistic map:
 
-| You are | Phases you'll actually run |
+| Reader | Phases typically run |
 |---|---|
-| Frontier lab / national program (SDAIA, G42, Moonshot) | All of them, from raw data to RL |
-| Serious regional player with a GPU cluster | Continued pretraining + full post-training on an open base (the ALLaM / AceGPT path, Ch. 13) |
-| Product team with modest GPUs | SFT + DPO, maybe LoRA-based, on an instruct or base model (Ch. 14-17) |
-| Most teams | No training at all: prompting + RAG, revisited quarterly as open models improve |
+| Frontier lab or national program (SDAIA, G42, Moonshot) | All phases, from raw data to RL |
+| Regional lab with a GPU cluster | Continued pretraining and full post-training on an open base (the ALLaM and AceGPT path, Ch. 13) |
+| Product team with modest GPUs | SFT and DPO, often LoRA-based, on an instruct or base model (Ch. 14-17) |
+| Application team | No training: prompting and retrieval, revisited as open models improve |
 
-Parts II and III mostly concern the first two rows, Parts IV and V the third. Readers in the fourth row should read Ch. 17 and Ch. 18 before deciding to train at all.
+Parts II and III mostly concern the first two rows, and Parts IV and V the third. Readers in the fourth row should read Ch. 17 and Ch. 18 before deciding to train at all.
 
-## 2. The economics: what training actually costs
+**References:**
+- Qwen3 Technical Report: https://arxiv.org/abs/2505.09388
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- DeepSeek-R1: https://arxiv.org/abs/2501.12948
+- The Smol Training Playbook (Hugging Face): https://huggingface.co/spaces/HuggingFaceTB/smol-training-playbook
+
+## 2. The Economics of Training
 
 ### 2.1 The compute arithmetic
 
@@ -108,501 +117,710 @@ The standard estimate for training compute is:
 
 $$C \approx 6 \cdot N \cdot D \quad \text{FLOPs}$$
 
-where $N$ is parameter count and $D$ is training tokens. The 6 comes from roughly 2 FLOPs per parameter per token for the forward pass and 4 for the backward pass. For MoE models, $N$ is the *activated* parameter count per token, which is exactly why sparse models changed the economics: DeepSeek-V3 has 671B total parameters but only 37B active, so each token costs compute like a 37B dense model while the model stores knowledge like a much larger one.
+where $N$ is the parameter count and $D$ is the number of training tokens. The factor 6 comes from roughly 2 FLOPs per parameter per token for the forward pass and 4 for the backward pass. For mixture-of-experts (MoE) models, $N$ is the *activated* parameter count per token, which is why sparse models changed the economics: DeepSeek-V3 has 671B total parameters but only 37B active, so each token costs the compute of a 37B dense model while the model stores knowledge like a much larger one.
 
-Convert FLOPs to time with:
+FLOPs convert to wall-clock time as follows:
 
 $$\text{days} = \frac{6ND}{\;\text{GPUs} \times \text{peak FLOPs/s} \times \text{MFU} \times 86{,}400\;}$$
 
-**MFU (Model FLOPs Utilization)** is the fraction of theoretical peak your training actually achieves, and it is where all the engineering lives. Real, published values, worth memorizing as calibration points:
+**Model FLOPs Utilization (MFU)** is the fraction of the hardware's theoretical peak that a training run achieves, and most training-systems engineering is aimed at raising it. Published values that serve as calibration points:
 
-| Run | Hardware | MFU / throughput | Source |
+| Run | Hardware | MFU or throughput | Source |
 |---|---|---|---|
-| OPT-175B (2021) | 992× A100 80GB | up to 147 TFLOP/s per GPU (~47% of A100 BF16 peak) | OPT paper |
-| BLOOM-176B (2022) | 384× A100 80GB | ~156 TFLOP/s per GPU (~50%) | GENCI / BigScience |
-| MegaScale 175B (2024) | 12,288 GPUs | 55.2% MFU (1.34× over stock Megatron-LM) | ByteDance NSDI'24 |
-| Llama 3.1 405B (2024) | 16,384× H100 | ~38-43% (380-430 TFLOPs/GPU, BF16) | Llama 3 paper |
-| SmolLM3 3B (2025) | 384× H100 | ~30% end-to-end MFU (kernel-level matmuls hit 72-77% of peak; communication and non-matmul ops eat the rest) | Smol Training Playbook |
+| OPT-175B (2021-22) | 992× A100 80GB | up to 147 TFLOP/s per GPU (about 47% of the A100's 312 TFLOP/s half-precision peak) | OPT paper |
+| BLOOM-176B (2022) | 384× A100 80GB | about 156 TFLOP/s per GPU in the fastest configuration (about 50%) | BLOOM paper |
+| MegaScale 175B (2024) | 12,288 GPUs | 55.2% MFU (1.34× over Megatron-LM) | ByteDance, NSDI 2024 |
+| Llama 3.1 405B (2024) | 16,384× H100 | 38-43% (380-430 TFLOP/s per GPU, BF16) | Llama 3 paper |
+| SmolLM3 3B (2025) | 384× H100 | about 30% end to end. Matrix-multiply kernels alone reach 72-77% of peak. Communication and non-matmul operations account for the difference | Smol Training Playbook |
 
-The gap between "the GPU's spec sheet" and "your training run" is routinely 2-3×. When someone quotes you a training timeline computed at peak FLOPs, multiply by 2.5 and you will be closer to reality.
+The gap between an accelerator's specification sheet and a real training run is routinely a factor of 2 to 3. A timeline computed at peak FLOPs should be multiplied by roughly 2.5 to obtain a realistic estimate.
 
-### 2.2 Real invoices
+### 2.2 Published training costs
 
-**DeepSeek-V3, the efficiency benchmark.** The technical report breaks the bill down precisely: 2.664M H800 GPU-hours for pretraining 14.8T tokens (about 180K GPU-hours per trillion tokens, i.e. 3.7 days per trillion on their 2,048-GPU cluster), plus 119K GPU-hours for context extension and only 5K for post-training, totaling 2.788M GPU-hours. At an assumed $2/GPU-hour rental that is the famous **$5.576M**. The number is accurate for what it measures and misleading as a comparison:
+**DeepSeek-V3: the efficiency reference.** The technical report itemizes the bill: 2.664M H800 GPU-hours for pretraining on 14.8T tokens (about 180K GPU-hours per trillion tokens, or 3.7 days per trillion on the 2,048-GPU cluster), plus 119K GPU-hours for context extension and 5K for post-training, for a total of 2.788M GPU-hours. At an assumed rental price of $2 per GPU-hour, that is the widely quoted **$5.576M**. The number is accurate for what it measures and misleading as a comparison:
 
-- Honest: it was achieved with architecture-training co-design (MoE with 37B active, MLA to shrink memory, FP8 compute, multi-token prediction densifying each step, custom DualPipe communication to work around the H800's deliberately weakened interconnect). The report also states the run had **no irrecoverable loss spikes and no rollbacks**, which itself saves enormous money (see Ch. 8).
-- Misleading: the figure covers only the *final* run. It excludes every ablation, failed experiment, researcher salary, and the capital cost of owning 2,048 H800s (far more than $5.5M). Comparing it against another lab's fully-loaded budget is an apples-to-invoices error that half of LinkedIn made in January 2025.
+- Accurate: it was achieved through co-design of architecture and training system (MoE with 37B active parameters, multi-head latent attention to reduce memory, FP8 compute, multi-token prediction to densify each step, and the custom DualPipe schedule to work around the H800's restricted interconnect). The report also states that the run had **no irrecoverable loss spikes and no rollbacks**, which is itself a large saving (Ch. 8).
+- Misleading: the figure covers only the *final* run. It excludes every ablation, failed experiment, and researcher salary, and the capital cost of owning 2,048 H800s, which is far more than $5.5M. Comparing it with another laboratory's fully loaded budget compares a single invoice with a total cost, an error that was widespread in commentary in January 2025.
 
-**Llama 3.1 405B** used 30.84M GPU-hours on H100s for a similar token count (~15T), roughly 11× DeepSeek-V3's hours. Dense architecture, BF16 everywhere, and a much larger active parameter count per token explain most of the gap: this is the cost of not co-designing for efficiency (and of training a year earlier).
+**Llama 3.1 405B** used 30.84M H100 GPU-hours for a similar token count (about 15T), roughly 11 times DeepSeek-V3's hours. A dense architecture, BF16 throughout, and a much larger active parameter count per token explain most of the difference. It is the cost of not co-designing for efficiency, and of training a year earlier.
 
-**BLOOM-176B** cost about 1.08M A100-hours over 3.5 months on France's Jean Zay supercomputer (estimated $2-5M cloud-equivalent including preliminary experiments), consuming 433 MWh. Useful as the "public-sector, 2022 technology" reference point.
+**BLOOM-176B** cost about 1.08M A100-hours over 3.5 months on France's Jean Zay supercomputer (an estimated $2-5M in cloud-equivalent terms, including preliminary experiments) and consumed 433 MWh. It is a useful reference point for a public-sector run on 2022 technology.
 
-**SmolLM3-3B** is the best-documented small run. The Smol Training Playbook publishes GPU-hours, not dollars: 276,480 H100-hours for the main 11T-token run (384 H100s for about a month), plus 161,280 H100-hours of pretraining ablations, mid-training ablations, and a restart with its debugging, for 437,760 H100-hours in total. At an assumed $2-3 per H100-hour that is roughly $0.9-1.3M; the dollar figure is an estimate derived here, not one published by Hugging Face. More than a third of the total (37%) was spent outside the final run. The expensive part of training is rarely the planned run; it is the ablations and the restarts, and Ch. 19 catalogs the documented ones.
+**SmolLM3-3B** is the best-documented small run. The Smol Training Playbook publishes GPU-hours, not dollars: 276,480 H100-hours for the main 11T-token run (384 H100s for about a month), plus 161,280 H100-hours of pretraining ablations, mid-training ablations, and a restart with its debugging, for 437,760 H100-hours in total. At an assumed $2-3 per H100-hour that is roughly $0.9-1.3M. The dollar figure is an estimate derived here, not one published by Hugging Face. More than a third of the total (37%) was spent outside the final run. The expensive part of training is rarely the planned run. It is the ablations and the restarts, and Ch. 19 catalogs the documented ones.
 
-### 2.3 The hidden line items
+### 2.3 Costs outside the final run
 
-Budgets that only count the final run miss, in rough order of size:
+Budgets that count only the final run omit, in rough order of size:
 
-1. **Ablations and dead ends.** SmolLM3's team trained the full 3B architecture on 100B-token slices repeatedly to test data and architecture choices; Moonshot ran Kimi K2 ablations on a 3B-total/0.5B-active proxy MoE because full-size ablations at 1T parameters were unaffordable. A serious run budgets 10-30% of final-run compute for ablations, and skipping this is how you discover a bad decision 1T tokens in.
-2. **Restarts and instability.** PaLM's team handled around 20 loss spikes by rewinding and skipping batches; the ZClip paper, citing LLM360's K2-65B run, puts the cost of handling that run's loss spikes at an additional 30 days and 129.3 MWh; SmolLM3 restarted from scratch after burning 1T tokens on a seed bug. Effective training time on Llama 3.1 405B was above 90%, which is considered excellent, and still means paying for 16,384 H100s during the other ~10%.
-3. **Storage and I/O.** A full BLOOM checkpoint (weights + optimizer states) is 2.3TB, about 13 bytes per parameter; you keep many of them, and you must be able to write them fast enough that checkpointing doesn't stall 384+ GPUs (Ch. 10-11).
-4. **People.** An on-call rotation for a multi-week run is a real staffing cost; the OPT logbook is, among other things, a diary of engineers being paged through Christmas.
+1. **Ablations and abandoned directions.** SmolLM3's team repeatedly trained the full 3B architecture on 100B-token slices to test data and architecture choices. Moonshot ran Kimi K2 ablations on a proxy MoE with 3B total and 0.5B active parameters, because full-size ablations at 1T parameters were unaffordable. A common planning heuristic reserves 10-30% of final-run compute for ablations at frontier scale. The fraction is higher for small models: SmolLM3's ablations and debugging came to 58% of its main run. Omitting this work is how a poor decision is discovered one trillion tokens into the run.
+2. **Restarts and instability.** PaLM's team handled about 20 loss spikes by rewinding and skipping batches. The ZClip paper, citing LLM360's K2-65B run, puts the cost of handling that run's loss spikes at an additional 30 days and 129.3 MWh. SmolLM3 restarted from scratch after spending 1T tokens on a run with a seeding bug. Effective training time on Llama 3.1 405B was above 90%, which is considered excellent and still means paying for 16,384 H100s during the remaining time.
+3. **Storage and I/O.** A full BLOOM checkpoint (weights and optimizer state) is 2.3TB, about 13 bytes per parameter. Many checkpoints are retained, and they must be written fast enough that checkpointing does not stall hundreds of GPUs (Ch. 10-11).
+4. **People.** An on-call rotation for a multi-week run is a real staffing cost. The OPT logbook records engineers handling failures throughout the December holiday period.
 
-**Interview checkpoint (Ch. 2):** Given a 70B dense model, 15T tokens, 1,024 H100s (989 TFLOPs BF16 peak), and 40% MFU, estimate wall-clock. $C = 6 \times 70\text{e}9 \times 15\text{e}12 = 6.3\text{e}24$ FLOPs. Cluster delivers $1024 \times 989\text{e}12 \times 0.4 = 4.05\text{e}17$ FLOP/s. That is $1.56\text{e}7$ s ≈ **180 days**, before failures. This one calculation, done in your head, filters most vendor claims.
+**Worked example.** A 70B dense model, 15T tokens, 1,024 H100s (989 TFLOP/s BF16 peak), 40% MFU. $C = 6 \times 70\text{e}9 \times 15\text{e}12 = 6.3\text{e}24$ FLOPs. The cluster delivers $1024 \times 989\text{e}12 \times 0.4 = 4.05\text{e}17$ FLOP/s. The run takes $1.56\text{e}7$ s, about 180 days, before any failures. This single calculation is enough to test most vendor claims about training timelines.
+
+**References:**
+- OPT: Open Pre-trained Transformer Language Models: https://arxiv.org/abs/2205.01068
+- BLOOM: A 176B-Parameter Open-Access Multilingual Language Model: https://arxiv.org/abs/2211.05100
+- Estimating the Carbon Footprint of BLOOM, a 176B Parameter Language Model: https://arxiv.org/abs/2211.02001
+- MegaScale: Scaling Large Language Model Training to More Than 10,000 GPUs: https://arxiv.org/abs/2402.15627
+- The Llama 3 Herd of Models: https://arxiv.org/abs/2407.21783
+- DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- PaLM: Scaling Language Modeling with Pathways: https://arxiv.org/abs/2204.02311
+- ZClip: Adaptive Spike Mitigation for LLM Pre-Training: https://arxiv.org/abs/2504.02507
+- The Smol Training Playbook (Hugging Face): https://huggingface.co/spaces/HuggingFaceTB/smol-training-playbook
 
 ---
 
 # Part II: Pretraining
 
-## 3. Data engineering: the FineWeb school
+## 3. Data Engineering: The FineWeb Methodology
 
-Data work is 60% of a pretraining project's calendar time and gets 5% of the attention in tutorials. The FineWeb project (Hugging Face, 2024) changed that by publishing not just a 15-trillion-token dataset from 96 Common Crawl snapshots, but the full experimental record of how every curation decision was validated. Treat it as the reference methodology.
+Data work takes the majority of a pretraining project's calendar time and a small fraction of the attention in tutorials. The FineWeb project (Hugging Face, 2024) changed that by publishing not only a 15-trillion-token dataset built from 96 Common Crawl snapshots, but also the full experimental record of how each curation decision was validated. It is the reference methodology for this chapter.
 
 ### 3.1 The pipeline, stage by stage
 
-**Extraction.** Raw Common Crawl WARC files contain full HTML. FineWeb extracts main-content text with trafilatura, chosen empirically: models trained on trafilatura-extracted text beat models trained on the default WET extractions on downstream benchmarks, because boilerplate (menus, cookie banners, footers) is training poison. Lesson one: your HTML extractor is a model-quality decision, not a plumbing detail. (For Arabic, extraction is harder still: encoding issues, mixed RTL/LTR markup, and diacritics stripping by naive pipelines.)
+**Extraction.** Raw Common Crawl WARC files contain full HTML. FineWeb extracts the main-content text with trafilatura, a choice made empirically: models trained on trafilatura-extracted text outperformed models trained on Common Crawl's default WET extractions on downstream benchmarks, because boilerplate (menus, cookie banners, footers) degrades training data. The first lesson is that **the HTML extractor is a model-quality decision, not a plumbing detail.** For Arabic, extraction is harder: encoding problems, mixed right-to-left and left-to-right markup, and pipelines that strip diacritics.
 
-**Language identification.** A fastText-style classifier with a threshold (FineWeb keeps documents with P(English) ≥ 0.65). For Arabic corpora the equivalent step must additionally decide what to do with dialects, romanized Arabic (Arabizi), and heavy code-switching, which off-the-shelf LID handles poorly; ALLaM's team built their own filtering pipeline for a 540B-token Arabic corpus, half of it machine-translated from English (Ch. 13).
+**Language identification.** A fastText-style classifier with a threshold: FineWeb keeps documents with P(English) ≥ 0.65. For Arabic corpora, the equivalent step must also decide how to treat dialects, romanized Arabic (Arabizi), and heavy code-switching, all of which off-the-shelf language identification handles poorly. ALLaM's team built their own filtering pipeline for a 540B-token Arabic corpus, half of it machine-translated from English (Ch. 13).
 
-**Quality filtering.** FineWeb layers MassiveText-style and C4-style heuristics with a small set of custom filters, and, critically, **ablated each filter** instead of trusting intuition. For the custom filters the team computed more than fifty document statistics, derived seventeen candidate metric-threshold pairs from them, and kept only the three that survived ablation (fraction of lines ending in punctuation, fraction of characters in duplicated lines, fraction of lines shorter than 30 characters), which together remove about 22% of tokens. C4's rule dropping lines without terminal punctuation gave the largest single gain of any C4 filter but removed about 30% of all tokens, so it was dropped; the remaining C4 filters together did better while removing about 7%. Lesson two: every filter is a hypothesis; the only proof is training a model with and without it.
+**Quality filtering.** FineWeb layers MassiveText-style and C4-style heuristics with a small set of custom filters, and **ablated each filter** instead of relying on intuition. For the custom filters, the team computed more than fifty document statistics, derived seventeen candidate metric-threshold pairs from them, and kept only the three that survived ablation: the fraction of lines ending in punctuation, the fraction of characters in duplicated lines, and the fraction of lines shorter than 30 characters. Together these remove about 22% of tokens. C4's rule that drops lines without terminal punctuation gave the largest single gain of any C4 filter but removed about 30% of all tokens, so it was not adopted. The remaining C4 filters together performed better while removing about 7%. The second lesson is that **every filter is a hypothesis, and the only proof is a model trained with it and one trained without it.**
 
-**Deduplication, the counterintuitive result.** The team originally planned global MinHash deduplication across all 96 snapshots. Ablations showed the opposite of intuition: **per-snapshot dedup outperformed global dedup**. Global dedup preferentially deleted older, higher-quality content that recurs across years (the same good article crawled 20 times) while what survived globally skewed worse; deduplicating each crawl independently kept quality up. Their production config: MinHash over 5-grams, 112 hash functions split into 14 buckets of 8, roughly a 75% similarity threshold. A second surprise: after the FineWeb-Edu educational filter, additional dedup produced no measurable gain in their 1.8B/350B-token ablation. Deduplication interacts with everything else; measure, don't assume. (The classic Lee et al. result still holds as the baseline motivation: dedup cuts verbatim memorization by an order of magnitude and reaches the same loss in fewer steps.)
+**Deduplication.** The team originally planned global MinHash deduplication across all 96 snapshots. The ablations showed the opposite of the expected result: **deduplicating each snapshot independently outperformed global deduplication.** Global deduplication removed most of the content of older snapshots, and what survived in them was of lower quality than what was removed. Deduplicating each crawl independently preserved quality. The production configuration is MinHash over 5-grams with 112 hash functions split into 14 buckets of 8, which targets document pairs that are at least 75% similar. A second unexpected result appears on the FineWeb-Edu dataset card: deduplicating the educationally filtered subset had no measurable effect in their ablation setup (a 1.8B model on 350B tokens). Deduplication interacts with every other stage and should be measured, not assumed. The result of Lee et al. remains the baseline motivation: deduplication reduces verbatim memorization by an order of magnitude and reaches the same loss in fewer steps.
 
-**Model-based quality classification.** FineWeb-Edu filtered the 15T corpus down to 1.3T tokens using a small classifier trained on Llama-3-70B judgments of "educational value", and the filtered subset **outperforms the full dataset** on knowledge benchmarks. This is the single most copied idea of 2024-2026: nearly every serious lab now runs learned quality/domain classifiers over the whole corpus. Qwen3 pushed it furthest, labeling a 30T+ token corpus instance-by-instance along dimensions like educational value, domain, and safety, then optimizing the mixture at the instance level via small-proxy ablations.
+**Model-based quality classification.** FineWeb-Edu filtered the 15T corpus down to 1.3T tokens using a small classifier trained on Llama-3-70B-Instruct judgments of educational value, and the filtered subset outperforms the full dataset on knowledge benchmarks. This became the most widely copied idea of 2024-2026: most serious laboratories now run learned quality and domain classifiers over the whole corpus. Qwen3 took it furthest, labeling a corpus of more than 30T tokens instance by instance along dimensions such as educational value, domain, and safety, and then optimizing the mixture at the instance level through ablations on small proxy models.
 
-**Synthetic data joins the mixture.** Qwen3's corpus (36T tokens, 119 languages) was partly manufactured by its own ancestors: Qwen2.5-VL extracted text from PDF-like documents, Qwen2.5 cleaned it, and Qwen2.5-Math/Qwen2.5-Coder generated textbooks, QA pairs, and code. The earlier generation of a model family has become a data factory for the next. The risks (distribution narrowing, error amplification, benchmark leakage through synthetic channels) are managed the same way as everything else in this chapter: ablate on proxies, decontaminate against your eval suite (Ch. 18).
+**Synthetic data in the mixture.** Part of Qwen3's corpus (36T tokens, 119 languages) was produced by earlier models of the same family: Qwen2.5-VL extracted text from PDF-like documents, Qwen2.5 cleaned it, and Qwen2.5-Math and Qwen2.5-Coder generated textbooks, question-answer pairs, and code. One generation of a model family has become a data source for the next. The risks (narrowing of the distribution, amplification of errors, and benchmark leakage through synthetic channels) are managed like everything else in this chapter: ablate on proxies, and decontaminate against the evaluation suite (Ch. 18).
 
-**Data-side stability hygiene.** OLMo 2 filtered documents containing long repeated n-grams after tracing loss spikes partly to them: a page repeating the same token pattern thousands of times produces gradient pathologies (Ch. 8). Data cleaning is also a stability intervention.
+**Data hygiene for stability.** OLMo 2 removed documents containing long runs of repeated n-grams after tracing some loss spikes to them: a page that repeats the same token pattern thousands of times produces pathological gradients (Ch. 8). Data cleaning is also a stability intervention.
 
-### 3.2 Mixing: the ratios are the recipe
+### 3.2 Mixture design
 
-Given cleaned sources (web, code, math, papers, books, multilingual), the mixture weights are among the most consequential hyperparameters in the whole project, and the modern method for setting them is empirical: train small proxies on candidate mixtures, evaluate on early-signal benchmarks, extrapolate. OLMo 2 introduced "microannealing" for exactly this: short, cheap decay-phase runs on a candidate data source mixed into a base mixture, to measure that source's marginal value before buying it a seat in the real run. Llama 3's team similarly used small annealing runs to score new data sources. The general findings that replicate across reports:
+Given cleaned sources (web, code, mathematics, papers, books, multilingual text), the mixture weights are among the most consequential hyperparameters of the project. The current method for setting them is empirical: train small proxies on candidate mixtures, evaluate on early-signal benchmarks, and extrapolate. OLMo 2 introduced "microannealing" for this purpose: short, inexpensive decay-phase runs on a candidate data source mixed into a base mixture, which measure the source's marginal value before it is admitted to the real run. Llama 3's team similarly used small annealing runs to score new data sources. Findings that replicate across reports:
 
-- Code in the mixture helps general reasoning, not just coding.
-- Upsampling a high-quality source works up to a few epochs, then decays; Jais upsampled its 72B unique Arabic tokens to ~116B effective (about 1.6 epochs) because Arabic supply was the binding constraint (Ch. 13).
-- The best data is saved for last: quality-weighted curricula (plain web early, textbook-grade and reasoning-heavy late, during LR decay) consistently beat uniform mixing. This is the entire logic of mid-training (Ch. 12).
+- Code in the mixture improves general reasoning, not only coding.
+- Upsampling a high-quality source helps for a few epochs and then shows diminishing returns. Jais upsampled its 72B unique Arabic tokens to about 116B (roughly 1.6 epochs) because Arabic supply was the binding constraint (Ch. 13).
+- The highest-quality data is most valuable late. Quality-weighted curricula (plain web text early, textbook-grade and reasoning-heavy data late, during learning-rate decay) consistently outperform uniform mixing. This is the logic of mid-training (Ch. 12).
 
-### 3.3 What this means if you are building an Arabic corpus
+### 3.3 Implications for Arabic corpus construction
 
-Everything above, plus: the public Arabic web is a fraction of English (Jais's 72B-token corpus was the largest Arabic collection of its time, versus multi-trillion-token English corpora); Common Crawl's Arabic slice is disproportionately boilerplate, mirrored news, and religious text (fine content, but a skewed distribution); dialectal text lives on social platforms with restrictive terms; and OCR of Arabic books remains a genuine data moat for whoever does it well (layout, ligatures, diacritics). This scarcity is why every Arabic model story in Ch. 13 is fundamentally a data story, and why translated data (ALLaM used translated corpora deliberately, and roughly a quarter of Jais's Arabic was translated from English) shows up despite its known style artifacts: the alternative was not having the tokens at all.
+All of the above applies, with additional constraints. The public Arabic web is a small fraction of the English web: Jais's 72B-token corpus was the largest Arabic collection of its time, against multi-trillion-token English corpora. Common Crawl's Arabic portion is disproportionately boilerplate, mirrored news, and religious text, which is useful content with a skewed distribution. Dialectal text is concentrated on social platforms with restrictive terms of use. OCR of Arabic books remains a real data advantage for any organization that does it well, because layout, ligatures, and diacritics are all difficult. This scarcity is why every Arabic model described in Ch. 13 is fundamentally a data project, and why translated data appears despite its known stylistic artifacts: ALLaM used translated corpora deliberately, and roughly a quarter of Jais's Arabic tokens were translated from English. The alternative was not having the tokens.
 
-## 4. Tokenizers, and the Arabic tokenization tax
+**References:**
+- The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale: https://arxiv.org/abs/2406.17557
+- FineWeb blog post (Hugging Face): https://huggingface.co/spaces/HuggingFaceFW/blogpost-fineweb-v1
+- FineWeb-Edu dataset card: https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu
+- Deduplicating Training Data Makes Language Models Better (Lee et al.): https://arxiv.org/abs/2107.06499
+- Qwen3 Technical Report: https://arxiv.org/abs/2505.09388
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- The Llama 3 Herd of Models: https://arxiv.org/abs/2407.21783
+- Dolma: an Open Corpus of Three Trillion Tokens for Language Model Pretraining Research: https://arxiv.org/abs/2402.00159
+- DataComp-LM (DCLM): https://arxiv.org/abs/2406.11794
+- Jais and Jais-chat: https://arxiv.org/abs/2308.16149
+- ALLaM: Large Language Models for Arabic and English: https://arxiv.org/abs/2407.15390
 
-The tokenizer is fixed before training and haunts every stage after it. It determines (a) how much text fits in a context window, (b) what a "token" of compute buys you per language, and (c) how hard adaptation to a new language will be.
+## 4. Tokenizers and the Arabic Tokenization Tax
 
-### 4.1 Mechanics in one paragraph
+The tokenizer is fixed before training and constrains every stage that follows. It determines (a) how much text fits in a context window, (b) how much text a token of compute covers in each language, and (c) how difficult adaptation to a new language will be.
 
-Byte-level BPE starts from bytes and greedily merges the most frequent adjacent pairs until reaching a target vocabulary size, on a tokenizer-training corpus whose language balance silently sets each language's efficiency. The key measured quantity is **fertility**: average tokens per word. A tokenizer trained mostly on English will shatter Arabic words into many pieces, and Arabic's templatic morphology (root + pattern + clitics: و+سيكتبون+ها as one orthographic word) makes it especially vulnerable.
+### 4.1 Mechanics
 
-### 4.2 The tax, in numbers that hit the budget
+Byte-level BPE starts from bytes and greedily merges the most frequent adjacent pairs until it reaches a target vocabulary size. It is trained on a tokenizer-training corpus whose language balance determines each language's efficiency. The key measured quantity is **fertility**: the average number of tokens per word. A tokenizer trained mostly on English splits Arabic words into many pieces, and Arabic's templatic morphology (root, pattern, and clitics, as in و+سيكتبون+ها written as a single orthographic word) makes the language especially exposed to this effect.
 
-High fertility on your language means, simultaneously: fewer effective words per context window, more tokens (thus more compute and more money) to represent the same corpus, higher serving cost per answer, and worse per-token learning signal. The published measurements are large. Gosal et al. report Llama-2's tokenizer at 5.06 tokens per Arabic word, against 1.41 after adding 32K Arabic tokens, and ALLaM charts the same effect for its merged tokenizer. At those figures the same Arabic dataset costs about 3.6 times as many tokens to train through with the English-centric tokenizer. When you read "trained on X trillion tokens," always ask: whose tokens?
+### 4.2 The cost of fertility
 
-Two engineering responses exist:
+High fertility on the target language has four simultaneous costs: fewer words per context window, more tokens (and therefore more compute and money) to represent the same corpus, a higher serving cost per answer, and a weaker learning signal per token. The published measurements are large. Gosal et al. report Llama-2's tokenizer at 5.06 tokens per Arabic word, against 1.41 after adding 32K Arabic tokens, and ALLaM charts the same effect for its merged tokenizer. At those figures the same Arabic dataset costs about 3.6 times as many tokens to train through with the English-centric tokenizer. A statement that a model was "trained on X trillion tokens" should always prompt the question of whose tokens.
 
-1. **Train the tokenizer on the right balance from the start** (the from-scratch path). Jais trained a balanced bilingual vocabulary; BLOOM trained a 250,680-entry multilingual vocabulary with per-language alpha-weighting.
-2. **Vocabulary expansion of an existing model** (the adaptation path): merge new-language tokens into a pretrained model's tokenizer, extend the embedding matrix, and initialize each new token's embedding as the average of the old-tokenizer subtokens that compose it (subtoken-mean initialization, the method formalized as Fast Vocabulary Transfer by Gee et al., 2022, and used by ALLaM and RightNow-Arabic; WECHSEL is a different method that relies on aligned bilingual word embeddings). This is now the standard first move of language adaptation and is covered operationally in Ch. 13.
+Two engineering responses are established:
 
-3. A research third way: morphology-aware tokenization, like the MorphBPE line from the Fanar project, which respects Arabic morpheme boundaries inside BPE. (See [MorphBPE](https://github.com/h9-tec/MorphBPE) for an implementation.)
+1. **Train the tokenizer on the intended balance from the start** (the from-scratch path). Jais trained a balanced bilingual vocabulary. BLOOM trained a multilingual vocabulary of 250,680 entries, with per-language sampling weights that its model card describes as alpha-weighting.
+2. **Expand the vocabulary of an existing model** (the adaptation path): merge new-language tokens into a pretrained model's tokenizer, extend the embedding matrix, and initialize each new token's embedding as the average of the embeddings of the old-tokenizer subtokens that compose it. This is subtoken-mean initialization, the method formalized as Fast Vocabulary Transfer by Gee et al. (2022) and used by ALLaM and RightNow-Arabic. WECHSEL, which is sometimes cited for it, is a different method that relies on aligned bilingual word embeddings. Vocabulary expansion is now the standard first step of language adaptation and is covered operationally in Ch. 13.
 
-### 4.3 Practical checks before you commit a tokenizer
+A third direction is still research: morphology-aware tokenization, such as the MorphBPE work from the Fanar project, which respects Arabic morpheme boundaries inside BPE. (See [MorphBPE](https://github.com/h9-tec/MorphBPE) for an implementation.)
 
-- Measure fertility on *your* target distributions (MSA news, dialectal chat, code-switched support tickets), not on a generic corpus. A model for Saudi call centers lives on dialect, and fertility there is usually worse than on MSA.
-- Check digit handling (individual digits vs. chunks), whitespace and newline treatment (matters for code), diacritics behavior (are they separate tokens? stripped?), and Arabic presentation forms / Unicode normalization (NFKC or not, decide once).
-- Vocabulary size trades embedding-parameter cost against sequence length; at small model scale the embedding matrix can dominate parameters (a 0.5B model with a 150K vocabulary spends a huge fraction of its weights on embeddings), which is why small-model adapters inject only the most valuable new tokens (Kuwain added Arabic tokens to TinyLlama; RightNow injected 27,032 Arabic tokens into Qwen2.5-0.5B rather than retraining the whole vocabulary).
+### 4.3 Checks before committing to a tokenizer
 
-## 5. Scaling laws, budgets, and the ablation game
+- Measure fertility on the target distributions (MSA news, dialectal chat, code-switched support tickets), not on a generic corpus. A model for Saudi call centers operates mostly on dialect, where fertility is usually worse than on MSA.
+- Check digit handling (individual digits or chunks), whitespace and newline treatment (which matters for code), the behavior of diacritics (separate tokens, or stripped), and the handling of Arabic presentation forms and Unicode normalization (decide once whether to apply NFKC).
+- Vocabulary size trades embedding-parameter cost against sequence length. At small model scale the embedding matrix can dominate the parameter count: a 0.5B model with a 150K vocabulary spends a large fraction of its weights on embeddings. This is why small-model adaptations add only the most valuable new tokens. Kuwain added 26K Arabic tokens to TinyLlama, and RightNow-Arabic added 27,032 Arabic tokens to Qwen2.5-0.5B instead of retraining the whole vocabulary.
+
+**References:**
+- Bilingual Adaptation of Monolingual Foundation Models (Gosal et al.): https://arxiv.org/abs/2407.12869
+- ALLaM: Large Language Models for Arabic and English: https://arxiv.org/abs/2407.15390
+- Jais and Jais-chat: https://arxiv.org/abs/2308.16149
+- BLOOM: https://arxiv.org/abs/2211.05100 and model card: https://huggingface.co/bigscience/bloom
+- Fast Vocabulary Transfer for Language Model Compression (Gee et al., EMNLP 2022 Industry Track): https://aclanthology.org/2022.emnlp-industry.41/
+- WECHSEL: https://arxiv.org/abs/2112.06598
+- MorphBPE: https://arxiv.org/abs/2502.00894
+- Kuwain 1.5B: An Arabic SLM via Language Injection: https://arxiv.org/abs/2504.15120
+- RightNow-Arabic-0.5B-Turbo: https://arxiv.org/abs/2605.28827
+
+## 5. Scaling Laws, Budgets, and Ablation Methodology
 
 ### 5.1 Chinchilla and what replaced it in practice
 
-The Chinchilla result says that for a fixed compute budget $C = 6ND$, loss is minimized around $D \approx 20N$: a 10B model wants ~200B tokens. Every modern open model violates this on purpose, in the overtrained direction: Llama 3 8B saw ~15T tokens (about 1,875 tokens per parameter), Qwen3's dense models trained on 36T, SmolLM3-3B on 11T. The reason is that Chinchilla optimizes *training* compute only, while the thing being minimized commercially is *training + lifetime inference* cost. A smaller model trained far past compute-optimality is cheaper to serve forever, so the industry systematically buys extra pretraining tokens to shrink the deployed model. When you see a "compute-optimal" claim, ask which cost function.
+The Chinchilla result states that for a fixed compute budget $C = 6ND$, loss is minimized near $D \approx 20N$: a 10B model should be trained on about 200B tokens. Every current open model departs from this on purpose, in the overtrained direction. Llama 3 8B was trained on about 15T tokens (about 1,875 tokens per parameter), Qwen3's dense models on 36T, and SmolLM3-3B on 11T. The reason is that Chinchilla optimizes *training* compute only, while the quantity a deploying organization minimizes is training cost plus lifetime inference cost. A smaller model trained far beyond the compute-optimal point is cheaper to serve for its whole life, so the industry systematically spends additional pretraining tokens to reduce the size of the deployed model. A claim that a model is "compute-optimal" should prompt the question of which cost function was used.
 
-The other quiet revolution: scaling laws stopped being just about N and D and became a hyperparameter-transfer tool. Qwen3 reports scaling-law-guided tuning of learning rate schedules and batch sizes, fit separately for dense and MoE models and per training stage. The pattern: fit trends on a ladder of small models, predict the large model's optimal settings, verify with one or two spot checks.
+A second change is less visible: scaling laws are no longer only about $N$ and $D$. They have become a tool for transferring hyperparameters. Qwen3 reports scaling-law-guided tuning of learning-rate schedules and batch sizes, fitted separately for dense and MoE models and for each training stage. The pattern is to fit trends on a ladder of small models, predict the optimal settings of the large model, and verify the prediction with one or two spot checks.
 
-### 5.2 The ablation game: how decisions actually get made
+### 5.2 Ablation methodology: how design decisions are made
 
-No lab decides architecture or data questions by argument; they decide by proxy runs, and the craft is in making proxies predictive:
+Laboratories do not settle architecture or data questions by argument. They settle them with proxy runs, and the skill lies in making the proxies predictive:
 
-- **Same size, fewer tokens.** SmolLM3 ran its ablations as the full 3B architecture on 100B tokens (roughly 1% of the final run). For readers, the playbook reproduces the same comparisons on a 1B model trained on 45B tokens, about a day and a half on one 8×H100 node. Cheap enough to iterate, big enough to transfer.
-- **Smaller proxy of the same shape.** Kimi K2 (1T total / 32B active) ran ablations on a 3B-total / 0.5B-active MoE with matched design ratios. Vanilla-Muon instability was caught on a 53B-total / 9B-active mid-scale run before it could destroy the real one (Ch. 8): the proxy ladder is also your safety net.
-- **Early-signal evaluation.** At ablation scale, most benchmarks are noise. The Smol playbook's answer is task formulation: cloze-style likelihood scoring gives usable signal on small models where multiple-choice and free-generation formats are still flat (more in Ch. 18).
-- **Decay-phase probes.** OLMo 2's microannealing (Sec. 3.2) turns the LR-decay phase into a measurement instrument for data value.
+- **Same size, fewer tokens.** SmolLM3 ran its ablations as the full 3B architecture on 100B tokens (roughly 1% of the final run). For readers, the playbook reproduces the same comparisons on a 1B model trained on 45B tokens, which takes about a day and a half on one 8×H100 node. Such runs are inexpensive enough to iterate on and large enough for the conclusions to transfer.
+- **A smaller proxy of the same shape.** Kimi K2 (1T total, 32B active) ran ablations on an MoE with 3B total and 0.5B active parameters and matched design ratios. The instability of unmodified Muon was caught on a mid-scale run with 53B total and 9B active parameters before it could damage the real run (Ch. 8). The proxy ladder also serves as a safety net.
+- **Early-signal evaluation.** At ablation scale, most benchmarks are noise. The Smol Training Playbook's answer is task formulation: cloze-style likelihood scoring gives usable signal on small models where multiple-choice and free-generation formats are still flat (Ch. 18).
+- **Decay-phase probes.** OLMo 2's microannealing (Sec. 3.2) turns the learning-rate decay phase into an instrument for measuring data value.
 
-The discipline to internalize: **every opinion about training is either an ablation result or a guess.** The published reports that read as confident (Qwen3's stage ratios, FineWeb's filter set, OLMo 2's stability package) are compressed summaries of hundreds of small runs. Budget for yours (10-30% of final-run compute, Sec. 2.3), and log them so the next project inherits the answers.
+The discipline to adopt is that every opinion about training is either the result of an ablation or a guess. The published reports that read as confident (Qwen3's stage ratios, FineWeb's filter set, OLMo 2's stability package) are compressed summaries of hundreds of small runs. A project should budget for its own ablations (Sec. 2.3) and log them, so that the next project inherits the answers.
 
-### 5.3 Small-scale corollary
+### 5.3 Application at small scale
 
-The same methodology scales down honestly. If your "final run" is a 1.5B Arabic adaptation on 8×H100 (Ch. 13's Kuwain/RightNow tier), your ablation tier is a 0.3-0.5B model on a few billion tokens, and the questions are identical: which vocabulary injection size, which replay ratio of original-language data, which LR. Teams that skip straight to the final run at this scale lose more GPU-days to re-runs than the ablations would have cost.
+The same methodology applies at small scale. If the final run is a 1.5B Arabic adaptation on 8×H100 (the scale of Kuwain and RightNow-Arabic in Ch. 13), the ablation tier is a 0.3-0.5B model on a few billion tokens, and the questions are identical: how many tokens to add to the vocabulary, what replay ratio of original-language data to use, and what learning rate. Teams that skip directly to the final run at this scale lose more GPU-days to repeated runs than the ablations would have cost.
 
-## 6. Architecture choices that are really training choices
+**References:**
+- Training Compute-Optimal Large Language Models (Chinchilla): https://arxiv.org/abs/2203.15556
+- The Llama 3 Herd of Models: https://arxiv.org/abs/2407.21783
+- Qwen3 Technical Report: https://arxiv.org/abs/2505.09388
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- The Smol Training Playbook (Hugging Face): https://huggingface.co/spaces/HuggingFaceTB/smol-training-playbook
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
 
-Architecture papers frame their choices as modeling ideas. Reading the 2024-2026 reports closely, most load-bearing choices are actually about training economics and stability.
+## 6. Architecture Choices as Training Decisions
 
-**MoE is a cost decision.** A mixture-of-experts layer routes each token to a few experts out of many, decoupling knowledge capacity (total parameters) from per-token compute (active parameters). DeepSeek-V3: 671B total, 37B active. Kimi K2: 1T total, 32B active across 384 experts. The training bill scales with active parameters (Sec. 2.1), which is how a $5.6M final run and a 1T-parameter model coexist. The price is paid in engineering: expert parallelism, all-to-all communication, and the load-balancing problem: if routing collapses onto a few experts, you paid for parameters that never train. The classical fix is an auxiliary load-balancing loss, which distorts the main objective; DeepSeek-V3's auxiliary-loss-free strategy (bias-based routing adjustment) and Qwen3's global-batch load-balancing loss are two different resolutions of the same tension. If you evaluate MoE claims, ask three questions: active params per token, expert-parallel communication cost on the actual interconnect, and what keeps routing balanced.
+Architecture papers present their choices as modeling ideas. A close reading of the 2024-2026 reports shows that most of the consequential choices are decisions about training economics and stability.
 
-**MLA is a memory decision.** DeepSeek's Multi-head Latent Attention compresses keys/values into a low-rank latent, cutting KV-cache size massively. It is presented as an inference feature, but during training it also shrinks activation memory and communication, part of why V3's hours are so low. GQA (grouped-query attention: many query heads share fewer KV heads) is the mainstream version of the same trade; SmolLM3 uses GQA with 4 groups, Qwen3-8B runs 32 query heads against 8 KV heads.
+**MoE is a cost decision.** A mixture-of-experts layer routes each token to a few experts out of many, which decouples knowledge capacity (total parameters) from per-token compute (active parameters). DeepSeek-V3 has 671B total and 37B active parameters. Kimi K2 has 1T total and 32B active across 384 experts. The training bill scales with active parameters (Sec. 2.1), which is how a $5.6M final run and a 1T-parameter model can both exist. The price is paid in engineering: expert parallelism, all-to-all communication, and the **load-balancing problem**. If routing collapses onto a few experts, the remaining parameters are paid for and never trained. The classical remedy is an auxiliary load-balancing loss, which distorts the main objective. DeepSeek-V3's auxiliary-loss-free strategy (a bias-based routing adjustment) and Qwen3's global-batch load-balancing loss are two different resolutions of the same tension. Three questions test any MoE claim: the active parameters per token, the cost of expert-parallel communication on the actual interconnect, and the mechanism that keeps routing balanced.
 
-**Stability features are now architecture.** QK-norm (RMSNorm applied to queries and keys before the attention dot product) appears in OLMo 2, Qwen3 (all models), Gemma, and many 2025-2026 reports, because unbounded attention logits are a leading cause of divergence (Ch. 8). OLMo 2 also reordered normalization (normalizing sublayer *outputs*) and adopted z-loss on the final softmax. OLMoE measured QK-norm costing almost 10% throughput and kept it anyway; stability is worth paying for. When you see these in a model card, read them as scar tissue from someone's diverged run.
+**MLA is a memory decision.** DeepSeek's multi-head latent attention compresses keys and values into a low-rank latent, which greatly reduces the size of the KV cache. It is presented as an inference feature, but during training it also reduces activation memory and communication, which is part of the reason DeepSeek-V3's GPU-hours are so low. Grouped-query attention (GQA), in which many query heads share fewer key-value heads, is the mainstream version of the same trade. SmolLM3 uses GQA with 4 groups, and Qwen3-8B runs 32 query heads against 8 key-value heads.
 
-**Multi-token prediction (MTP) is a signal-density decision.** DeepSeek-V3 adds a sequential prediction module so that each position also predicts one additional future token (prediction depth 1), extracting more gradient signal per sequence (and doubling as a speculative-decoding module at inference). More learning per token processed = fewer GPU-hours per unit of capability.
+**Stability features are now part of the architecture.** QK-norm (RMSNorm applied to queries and keys before the attention dot product) appears in OLMo 2, all Qwen3 models, Gemma 3, and many 2025-2026 reports, because unbounded attention logits are a leading cause of divergence (Ch. 8). OLMo 2 also reordered normalization (it normalizes sublayer outputs) and adopted z-loss on the final softmax. OLMoE measured a throughput cost of almost 10% for QK-norm and kept it, which indicates how much stability is worth. When these features appear in a model card, they usually record a divergence that someone experienced.
 
-**Positional-encoding choices are context-cost decisions.** RoPE everywhere, with the modern refinements aimed at cheap long-context extension (Ch. 12): partial/adjusted RoPE, NoPE-hybrid layers (SmolLM3), and YaRN-style rescaling at extension time (Kimi K2 to 128K). ALiBi (BLOOM) was an earlier attempt at the same goal.
+**Multi-token prediction (MTP) is a signal-density decision.** DeepSeek-V3 adds a sequential prediction module so that each position also predicts one additional future token (prediction depth 1). This extracts more gradient signal from each sequence, and the module also serves as a speculative-decoding draft at inference. More learning per processed token means fewer GPU-hours per unit of capability.
 
-**The meta-lesson.** Between 2022's BLOOM/OPT and 2026's frontier, the transformer block barely changed; what changed is that every remaining choice is justified by ablations against a cost function that includes training stability and serving cost. Architecture reviews in your team should be run the same way: not "is this idea elegant" but "what does it do to tokens/sec, memory, spike risk, and the inference bill."
+**Positional-encoding choices are decisions about context cost.** RoPE is universal, and the current refinements aim at inexpensive long-context extension (Ch. 12): partial or adjusted RoPE, hybrid layers without positional encoding (NoPE, used in every fourth layer of SmolLM3), and YaRN-style rescaling at extension time (Kimi K2 to 128K). ALiBi, used in BLOOM, was an earlier attempt at the same goal.
 
-## 7. Optimizers, schedules, and hyperparameters that matter
+**The general lesson.** Between BLOOM and OPT in 2022 and the frontier models of 2026, the transformer block changed very little. What changed is that every remaining choice is justified by ablations against a cost function that includes training stability and serving cost. An architecture review should be conducted the same way. The question is not whether an idea is elegant, but what it does to tokens per second, memory, spike risk, and the inference bill.
 
-### 7.1 AdamW, and the settings people get wrong
+**References:**
+- DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- Qwen3 Technical Report: https://arxiv.org/abs/2505.09388
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- OLMoE: Open Mixture-of-Experts Language Models: https://arxiv.org/abs/2409.02060
+- SmolLM3 (Hugging Face blog): https://huggingface.co/blog/smollm3
+- YaRN: Efficient Context Window Extension of Large Language Models: https://arxiv.org/abs/2309.00071
 
-AdamW remains the default: momentum ($\beta_1 \approx 0.9$), a second-moment normalizer ($\beta_2 \approx 0.95$ for LLMs, not the 0.999 default from vision), decoupled weight decay (~0.1), gradient clipping at norm 1.0. Three empirically load-bearing details from real reports:
+## 7. Optimizers, Schedules, and Hyperparameters
 
-- **Epsilon matters.** OLMo 2 moved Adam's $\epsilon$ from 1e-5 to 1e-8 and measured faster early loss improvement and a lower, more stable gradient norm. A too-large $\epsilon$ quietly damps the update exactly when gradients are small.
-- **Do not weight-decay the embeddings.** OLMo 2 traced part of its instability to decayed embeddings shrinking too far; small embedding norms inflate early-layer gradients (the LayerNorm Jacobian scales like $1/\lVert x \rVert$) and produced measurably more spikes. Exempt embeddings (and norms) from decay. (OLMoE found the effect minor at its scale and kept weight decay on all parameters, a reminder that these choices interact with size; when in doubt, follow the larger-scale evidence.)
-- **FP32 optimizer state, sharded.** Even in mixed precision, Adam's moments and the master weights stay in FP32; OPT kept Adam state in FP32 by sharding it across hosts while model weights ran FP16. This is why optimizer memory is ~8-12 bytes/param and why ZeRO/FSDP sharding exists (Ch. 10).
+### 7.1 AdamW and commonly misconfigured settings
 
-### 7.2 The Muon storyline: a 2025 changing of the guard
+AdamW remains the default: momentum ($\beta_1 \approx 0.9$), a second-moment normalizer ($\beta_2 \approx 0.95$ for LLMs, not the 0.999 default inherited from vision), decoupled weight decay (about 0.1), and gradient clipping at norm 1.0. Three details from published reports have measurable effects:
 
-Muon is a matrix-aware optimizer (momentum with a spectral orthogonalization step) that reaches a given loss in noticeably fewer tokens than AdamW. Moonshot bet Kimi K2 on it and hit Muon's known failure mode at scale: on a 53B-total/9B-active proxy, **maximum attention logits blew past 1,000**, the precursor of spikes and divergence. Their fix, MuonClip, wraps Muon with weight decay, RMS-matched update scale, and **QK-Clip**: monitor each attention head's max logit, and when it exceeds a threshold $\tau$, rescale that head's query/key projection weights directly. The result is the most striking stability datapoint in the public record: **15.5T tokens at 1T parameters with zero loss spikes**, a per-step loss curve published unsmoothed. Two portable lessons even if you never touch Muon: (1) max attention logit is a first-class monitoring signal, and (2) intervening on *weights* (rescaling) is stronger medicine than intervening on *gradients* (clipping), because it removes the cause rather than the symptom.
+- **Epsilon.** OLMo 2 moved Adam's $\epsilon$ from 1e-5 to 1e-8 and measured faster early loss improvement and a lower, more stable gradient norm. A value of $\epsilon$ that is too large damps the update when gradients are small.
+- **No weight decay on the embeddings.** OLMo 2 traced part of its instability to embeddings that had decayed too far. Small embedding norms inflate early-layer gradients (the LayerNorm Jacobian scales like $1/\lVert x \rVert$) and produced measurably more spikes. Embeddings and normalization parameters should be exempt from decay. OLMoE found the effect minor at its scale and kept weight decay on all parameters, which shows that these choices interact with model size. Where the evidence conflicts, the larger-scale evidence is the safer guide.
+- **FP32 optimizer state, sharded.** Even in mixed precision, Adam's moments and the master weights usually stay in FP32. OPT kept its Adam state in FP32 by sharding it across hosts while the model weights ran in FP16. This is why optimizer memory is about 8-12 bytes per parameter and why ZeRO and FSDP sharding exist (Ch. 10).
 
-### 7.3 Learning-rate schedules: cosine vs. WSD
+### 7.2 Muon and MuonClip
 
-- **Warmup** (linear, 500-2000 steps in most reports: OLMo 2 uses 2000, K2 used 500) exists because Adam's second-moment estimates are garbage at initialization; skipping warmup is a classic self-inflicted spike.
-- **Cosine decay** to ~10% of peak was the 2020-2023 default and still works (OLMo 2's 5T-token schedule).
-- **WSD (Warmup-Stable-Decay)** is the modern favorite: hold LR constant for most of training, decay only at the end. Kimi K2: 10T tokens flat at 2e-4, then 5.5T cosine down to 2e-5. SmolLM3: WSD with linear decay to zero over the final 10% (~1.1T tokens). WSD's killer feature is operational: with no pre-committed horizon baked into the schedule, you can extend training, fork the run, or launch decay-phase data experiments (microannealing, Sec. 3.2) from the stable plateau. It converted the LR schedule from a fixed contract into a management tool.
-- **Batch size** is scheduled too: global batches are now enormous (K2 held 67M tokens; SmolLM3 2.36M for a 3B model), often ramped up early in training; note that any batch-size change interacts with Adam's stale second-moment estimate and can transiently destabilize (a documented spike trigger).
+Muon is a matrix-aware optimizer (momentum followed by a spectral orthogonalization step) that reaches a given loss in noticeably fewer tokens than AdamW. Moonshot adopted it for Kimi K2 and encountered its known failure mode at scale: on a proxy with 53B total and 9B active parameters, the maximum attention logits exceeded 1,000, which precedes loss spikes and divergence. Their remedy, **MuonClip**, combines Muon with weight decay, an update scale matched in RMS to AdamW's, and **QK-Clip**: the maximum logit of each attention head is monitored, and when it exceeds a threshold $\tau$ (100 in the report), that head's query and key projection weights are rescaled directly. The result is the strongest stability datapoint in the public record: **15.5T tokens at 1T parameters with no loss spikes**, with the per-step loss curve published unsmoothed. Two lessons apply even to teams that never use Muon. First, the maximum attention logit is a primary monitoring signal. Second, an intervention on *weights* (rescaling) is stronger than an intervention on *gradients* (clipping), because it removes the cause and not the symptom.
 
-### 7.4 What actually needs tuning
+### 7.3 Learning-rate schedules: cosine and WSD
 
-For a given architecture family, the short list with real leverage: peak LR (the #1 spike knob and the #1 quality knob), warmup length, batch size, WSD decay fraction, weight decay, and z-loss on/off. Almost everything else transfers from the reports cited here. Spend your ablation budget accordingly.
+- **Warmup** (linear, 500-2,000 steps in most reports: OLMo 2 uses 2,000 and Kimi K2 used 500) exists because Adam's second-moment estimates are unreliable at initialization. Omitting warmup is a common cause of early loss spikes.
+- **Cosine decay** to about 10% of the peak was the default from 2020 to 2023 and still works (OLMo 2's schedule, planned for 5T tokens).
+- **WSD (warmup-stable-decay)** is the current preference: the learning rate is held constant for most of training and decayed only at the end. Kimi K2 held 2e-4 for 10T tokens and then followed a cosine decay to 2e-5 over 5.5T tokens. SmolLM3 used WSD with a linear decay to zero over the final 10% of training (about 1.1T tokens). WSD's main advantage is operational. Because no training horizon is fixed in the schedule, a team can extend training, fork the run, or launch decay-phase data experiments (microannealing, Sec. 3.2) from the stable plateau. The schedule becomes a management tool instead of a fixed commitment.
+- **Batch size is also scheduled.** Global batches are now very large (Kimi K2 held 67M tokens, and SmolLM3 used 2.36M for a 3B model) and are often ramped up early in training. Any change in batch size interacts with Adam's second-moment estimate, which was accumulated under the old batch size, and can destabilize training temporarily.
 
-## 8. Stability: the physics of loss spikes
+### 7.4 Hyperparameters that warrant tuning
 
-A loss spike is a sudden jump in training loss, sometimes recovering (benign), sometimes cascading into NaNs and divergence (malignant). Across the public record it is the defining operational drama of pretraining, so this chapter reconstructs both the mechanisms and the history of fixes.
+For a given architecture family, a short list of hyperparameters has real leverage: the **peak learning rate** (the most important setting for both spike risk and final quality), the warmup length, the batch size, the WSD decay fraction, the weight decay, and whether z-loss is enabled. Almost everything else transfers from the reports cited here. The ablation budget should be allocated accordingly.
+
+**References:**
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- OLMoE: Open Mixture-of-Experts Language Models: https://arxiv.org/abs/2409.02060
+- OPT: Open Pre-trained Transformer Language Models: https://arxiv.org/abs/2205.01068
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- Muon is Scalable for LLM Training (Moonshot): https://arxiv.org/abs/2502.16982
+- MiniCPM (introduces the WSD schedule): https://arxiv.org/abs/2404.06395
+- SmolLM3 (Hugging Face blog): https://huggingface.co/blog/smollm3
+- Spike No More (Takase et al.): https://arxiv.org/abs/2312.16903
+
+## 8. Training Stability: Loss-Spike Mechanisms and Mitigations
+
+A loss spike is a sudden increase in training loss. Some spikes recover on their own (benign), and others cascade into NaNs and divergence (malignant). Across the public record, loss spikes are the defining operational problem of pretraining. This chapter reconstructs both the mechanisms and the history of the mitigations.
 
 ### 8.1 The documented history
 
-- **OPT-175B (2021-22).** The logbook shows loss divergences handled by rolling back to a checkpoint and lowering the LR, mid-run optimizer surgery (AdamW to plain SGD and back), and hyperparameters adjusted in flight. Combined with hardware chaos (Ch. 11), stability work consumed a large share of the two-month run.
-- **PaLM 540B (2022).** Around 20 spikes despite gradient clipping. Mitigation protocol: rewind ~100 steps, skip the 200-500 batches surrounding the spike, continue. The famous observation: **replaying the exact triggering batch from the same checkpoint often did not reproduce the spike**, implying spikes arise from rare interactions between the optimizer *state* and specific data, not from bad data alone.
-- **GLM-130B (2022).** Months of investigation concluded that (a) with Pre-LN, deep-layer value scales can grow unboundedly (they adopted DeepNorm-style Post-LN), and (b) collapses were *preceded by gradient-norm spikes localized in the embedding layer*. Their fix, Embedding Gradient Shrink, scales the embedding layer's gradient down (α ≈ 0.1) and stabilized FP16 training. BLOOM survived the same era by adding LayerNorm after the embedding layer, at a measured cost to final quality: the 2022 trade was quality for survival.
-- **The cost when unmanaged.** The ZClip paper puts the cost of loss spikes in LLM360's K2-65B run at an additional 30 days and 129.3 MWh, spent on checkpoint rewinds, batch skipping, and learning-rate adjustments. K2-65B's own report describes two malignant spikes handled by restarting from earlier checkpoints. Instability is a budget line, not an anecdote.
-- **The 2024-2026 turn.** DeepSeek-V3: 14.8T tokens, no irrecoverable spikes, no rollbacks. Kimi K2: 15.5T tokens, zero spikes, at 1T parameters, in an MoE, with an aggressive optimizer. Stability went from managed crisis to solved-by-design in roughly three years, via the package below.
+- **OPT-175B (2021-22).** The logbook shows loss divergences handled by rolling back to a checkpoint and lowering the learning rate, optimizer changes during the run (a switch from AdamW to plain SGD, which plateaued quickly and was reverted), and hyperparameters adjusted in flight. Combined with frequent hardware failures (Ch. 11), stability work consumed a large share of the two-month run.
+- **PaLM 540B (2022).** About 20 spikes occurred despite gradient clipping. The mitigation protocol was to rewind about 100 steps, skip the 200-500 batches around the spike, and continue. The most cited observation is that **replaying the exact triggering batch from the same checkpoint often did not reproduce the spike**, which implies that spikes arise from rare interactions between the optimizer state and specific data, and not from bad data alone.
+- **GLM-130B (2022).** Months of investigation concluded that (a) with Pre-LN, value scales in deep layers can grow without bound (the team adopted a DeepNorm-style Post-LN), and (b) collapses were preceded by gradient-norm spikes localized in the *embedding layer*. Their remedy, **embedding gradient shrink**, scales the embedding layer's gradient down (α ≈ 0.1) and stabilized FP16 training. BLOOM survived the same period by adding a LayerNorm after the embedding layer, at a measured cost to zero-shot quality. In 2022, stability was obtained at the expense of quality.
+- **The cost when unmanaged.** The ZClip paper puts the cost of loss spikes in LLM360's K2-65B run at an additional 30 days and 129.3 MWh, spent on checkpoint rewinds, batch skipping, and learning-rate adjustments. K2-65B's own report describes two malignant spikes handled by restarting from earlier checkpoints. Instability is a budget line.
+- **The change after 2024.** DeepSeek-V3 trained on 14.8T tokens with **no irrecoverable spikes and no rollbacks**. Kimi K2 trained on 15.5T tokens with **no spikes at all**, at 1T parameters, in an MoE, with an aggressive optimizer. In roughly three years stability moved from a managed crisis to a property obtained by design, through the measures described below.
 
-### 8.2 Mechanisms, and the fix that maps to each
+### 8.2 Mechanisms and the mitigation for each
 
-| Mechanism | Signature | Fix (with provenance) |
+| Mechanism | Signature | Mitigation (with provenance) |
 |---|---|---|
-| Attention logit explosion: $q^\top k$ grows unbounded, softmax saturates, gradients go pathological | max attention logits climbing over hundreds of steps (K2's proxy hit >1000) | QK-norm on queries/keys (OLMo 2, Qwen3, Gemma); QKV clipping (DBRX, OLMo-0424); QK-Clip weight rescaling (MuonClip) |
-| Output-softmax logit drift: final logits' scale $Z$ grows | rising logit norms / occasional overflow late in net | z-loss $\lambda \log^2 Z$, $\lambda \sim 10^{-4}$ (PaLM lineage, Chameleon, OLMo 2) |
-| Embedding pathologies: abnormal embedding-layer gradients; over-decayed (too-small) embedding norms amplifying early-layer Jacobians | grad-norm spikes concentrated in embedding layer, a few steps *before* the loss spike | embedding gradient shrink (GLM-130B); exclude embeddings from weight decay (OLMo 2); embedding LayerNorm (BLOOM, quality cost) |
-| Optimizer-state × data interactions: Adam's stale moments meet a rare batch | non-reproducible spikes (PaLM's replay result); spikes after batch-size or LR changes | rewind + skip window (PaLM/OPT protocol); adaptive gradient clipping on gradient-norm statistics (ZClip); conservative $\beta_2$, proper warmup |
-| Data pathologies: massive repeated n-grams, corrupt shards | spike correlates with a specific shard/source | filter repeated n-grams (OLMo 2); shard-level provenance so you *can* correlate |
-| Precision underflow/overflow (FP16 era; FP8 today if done naively) | loss-scale collapse, inf/NaN in specific layers | BF16 (Ch. 9); for FP8, fine-grained scaling + high-precision accumulation (DeepSeek-V3) |
+| **Attention logit explosion**: $q^\top k$ grows without bound, the softmax saturates, and gradients become pathological | Maximum attention logits rising over hundreds of steps (Kimi K2's proxy exceeded 1,000) | **QK-norm** on queries and keys (OLMo 2, Qwen3, Gemma 3); QKV clipping (DBRX, OLMo-0424); **QK-Clip** weight rescaling (MuonClip) |
+| **Output-softmax logit drift**: the scale $Z$ of the final logits grows | Rising logit norms, occasional overflow late in the network | **z-loss** $\lambda \log^2 Z$, $\lambda \sim 10^{-4}$ (PaLM lineage, Chameleon, OLMo 2) |
+| **Embedding pathologies**: abnormal embedding-layer gradients, or over-decayed embedding norms that amplify early-layer Jacobians | Gradient-norm spikes concentrated in the embedding layer, a few steps *before* the loss spike | Embedding gradient shrink (GLM-130B); **no weight decay on embeddings** (OLMo 2); embedding LayerNorm (BLOOM, at a quality cost) |
+| **Interaction of optimizer state and data**: Adam's stale moments meet a rare batch | Spikes that do not reproduce (PaLM's replay result); spikes after changes in batch size or learning rate | Rewind and skip a window (PaLM and OPT protocol); adaptive gradient clipping on gradient-norm statistics (ZClip); conservative $\beta_2$ and adequate warmup |
+| **Data pathologies**: very long repeated n-grams, corrupt shards | The spike correlates with a specific shard or source | Filter repeated n-grams (OLMo 2); track provenance to the shard level so that the correlation can be found |
+| **Precision underflow or overflow** (the FP16 era, and FP8 today if done naively) | Collapse of the loss scale; inf or NaN in specific layers | BF16 (Ch. 9); for FP8, fine-grained scaling and high-precision accumulation (DeepSeek-V3) |
 
-### 8.3 The modern stability package (what to actually run)
+### 8.3 A default stability configuration
 
-If you start a pretraining or serious continued-pretraining run in 2026, the assembled default, each piece traceable to a report above: init from N(0, 0.02); QK-norm; z-loss ~1e-4; no weight decay on embeddings or norms; Adam(0.9, 0.95, eps 1e-8) or MuonClip if you have the engineering appetite; grad-clip 1.0; 500-2000 step warmup; WSD schedule; repeated-n-gram data filtering; and the monitoring below. OLMo 2 quantified its package with a "spike score" (fraction of steps whose loss sits far above the trend) and showed the before/after curves; K2 then demonstrated the end state: zero.
+For a pretraining run or a serious continued-pretraining run started in 2026, the following default can be assembled, with each element traceable to a report above: initialization from N(0, 0.02); QK-norm; z-loss at about 1e-4; no weight decay on embeddings or normalization parameters; Adam(0.9, 0.95, eps 1e-8), or MuonClip where the engineering capacity exists; gradient clipping at 1.0; 500-2,000 steps of warmup; a WSD schedule; filtering of repeated n-grams; and the monitoring described in the next section. OLMo 2 quantified the effect of its package with a "spike score" (the fraction of steps whose loss lies far above the trend) and published the curves before and after. Kimi K2 then demonstrated the end state: no spikes.
 
-### 8.4 Monitoring: the dashboard that predicts trouble
+### 8.4 Monitoring and leading indicators
 
-The consistent empirical finding is that **gradient norm leads loss**: GLM-130B saw collapses lag embedding-gradient spikes by a few steps; OLMo 2's spiky runs show grad-norm spikes growing in frequency before loss follows. Your run dashboard, in priority order: (1) per-layer-group gradient norms (embedding separated out), (2) max attention logit per layer (post-K2, non-negotiable), (3) loss vs. EMA-of-loss with an alert threshold, (4) parameter/update norm ratios, (5) throughput and MFU (a silent NCCL degradation shows up here first, Ch. 11), (6) for MoE: expert load entropy. Alert rules beat heroics: the report for K2-V2 (LLM360's 70B model from MBZUAI, unrelated to Moonshot's Kimi K2) shows a severe spike near step 464,000 being detected automatically, the job rolled back to the last committed checkpoint and relaunched, and a Slack notification sent, which is the operational bar to aim for.
+The consistent empirical finding is that **the gradient norm leads the loss**. GLM-130B saw collapses lag behind embedding-gradient spikes by a few steps, and OLMo 2's unstable runs show gradient-norm spikes growing in frequency before the loss follows. A run dashboard should show, in order of priority: (1) gradient norms per layer group, with the embedding layer separated; (2) the maximum attention logit per layer, which is essential after Kimi K2's experience; (3) the loss against an exponential moving average of the loss, with an alert threshold; (4) the ratios of parameter norms to update norms; (5) throughput and MFU, where a silent NCCL degradation shows first (Ch. 11); (6) for MoE models, the entropy of the expert load. Alert rules are more reliable than manual intervention. The report for K2-V2 (LLM360's 70B model from MBZUAI, unrelated to Moonshot's Kimi K2) shows a severe spike near step 464,000 being detected automatically, the job rolled back to the last committed checkpoint and relaunched, and a Slack notification sent. That is the operational standard to aim for.
 
-### 8.5 The restart decision tree
+### 8.5 Restart decision procedure
 
-When a spike fires anyway: if loss recovers to trend within a few hundred steps, log it and continue (benign). If not: rewind to the last healthy checkpoint, skip a 200-500-batch window around the trigger (PaLM protocol), optionally drop peak LR 10-30%, and resume. If spikes recur at increasing frequency (the GLM/OLMo signature), stop treating symptoms: something structural (schedule too hot, decayed embeddings, logit growth) needs one of the Sec. 8.2 fixes, and continuing to rewind is burning money. Checkpoint cadence math that makes all this survivable is in Ch. 11.
+When a spike occurs despite these measures: if the loss returns to trend within a few hundred steps, log the event and continue (benign). If it does not, rewind to the last healthy checkpoint, skip a window of 200-500 batches around the trigger (the PaLM protocol), optionally reduce the peak learning rate by 10-30%, and resume. If spikes recur at **increasing frequency** (the signature seen in GLM-130B and OLMo), treating symptoms is no longer appropriate. A structural cause (a schedule that is too aggressive, decayed embeddings, logit growth) requires one of the mitigations in Sec. 8.2, and continued rewinding wastes compute. The checkpoint-interval arithmetic that makes this procedure affordable is in Ch. 11.
 
-## 9. Numerics: FP16 pain, BF16 peace, FP8 frontier
+**References:**
+- OPT: Open Pre-trained Transformer Language Models: https://arxiv.org/abs/2205.01068
+- PaLM: Scaling Language Modeling with Pathways: https://arxiv.org/abs/2204.02311
+- GLM-130B: An Open Bilingual Pre-trained Model: https://arxiv.org/abs/2210.02414
+- BLOOM: https://arxiv.org/abs/2211.05100
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
+- Spike No More: Stabilizing the Pre-training of Large Language Models (Takase et al.): https://arxiv.org/abs/2312.16903
+- A Theory on Adam Instability in Large-Scale Machine Learning (Molybog et al.): https://arxiv.org/abs/2304.09871
+- ZClip: Adaptive Spike Mitigation for LLM Pre-Training: https://arxiv.org/abs/2504.02507
+- LLM360 K2: Building a 65B 360-Open-Source Large Language Model from Scratch: https://arxiv.org/abs/2501.07124
+- K2-V2: A 360-Open, Reasoning-Enhanced LLM: https://arxiv.org/abs/2512.06201
+- Chameleon: Mixed-Modal Early-Fusion Foundation Models: https://arxiv.org/abs/2405.09818
 
-### 9.1 Why precision is a training topic at all
+## 9. Numerical Precision: FP16, BF16, and FP8
 
-Each step down in precision roughly doubles arithmetic throughput and halves memory traffic, so every generation of training has pushed one format lower, and every push has produced a characteristic class of failures. The three-era history:
+### 9.1 Precision formats and their failure classes
 
-**FP16 (2019-2022): the loss-scaling era.** FP16's tiny exponent range underflows small gradients, so training required dynamic loss scaling: multiply the loss up, hope no overflow, back off on inf/NaN. OPT-175B ran weights in FP16 with FP32 Adam state and dynamic loss scaling, and its logbook's recurring drama of collapsing loss scale is the canonical record of this era's fragility. GLM-130B's months of spike archaeology (Ch. 8) happened largely because they were committed to FP16.
+Each step down in precision roughly doubles arithmetic throughput and halves memory traffic, so every generation of training has moved one format lower, and every move has produced a characteristic class of failures. The history has three periods.
 
-**BF16 (2022-present): the peace treaty.** BF16 keeps FP32's exponent range with less mantissa: no loss scaling, dramatically fewer range accidents, at a small precision cost absorbed by FP32 master weights and accumulation. Llama 3, OLMo 2, SmolLM3 and nearly everyone else train in BF16, and it is the correct default for any reader of this book training anything.
+**FP16 (2019-2022): loss scaling.** FP16's narrow exponent range underflows small gradients, so training required *dynamic loss scaling*: the loss is multiplied by a large factor, and the factor is reduced whenever an overflow produces inf or NaN. OPT-175B ran its weights in FP16 with FP32 Adam state and dynamic loss scaling, and the recurring collapse of the loss scale in its logbook is the standard record of how fragile this regime was. GLM-130B's months of spike investigation (Ch. 8) were largely a consequence of its commitment to FP16.
 
-**FP8 (2024-present): the frontier, done carefully.** DeepSeek-V3 is the first frontier-scale validation of FP8 as the *compute* format, and the report is precise about what made it work rather than diverge: fine-grained scaling (per 1×128 activation tiles and 128×128 weight blocks, so one outlier does not wreck a whole tensor's scale), and promotion of accumulations to higher precision at short intervals (accumulate every $N_C = 128$ elements in FP32-side registers, because tensor-core-internal accumulation alone was insufficient on their hardware), with sensitive components kept in higher precision. On H800s FP8 roughly doubles matmul throughput over BF16, which is a large part of the $5.6M arithmetic in Ch. 2. The portable lesson: FP8 is not a flag you flip; it is a scaling-granularity and accumulation-policy design. If you are not prepared to own that design, stay in BF16 and lose nothing but some throughput.
+**BF16 (2022 to the present): the stable default.** BF16 keeps FP32's exponent range and gives up mantissa bits. It needs no loss scaling and suffers far fewer range failures, at a small cost in precision that is absorbed by FP32 master weights and FP32 accumulation. Llama 3, OLMo 2, SmolLM3, and nearly every other current model train in BF16. It is the correct default for any reader of this handbook.
 
-### 9.2 The memory ledger (why your 70B doesn't fit)
+**FP8 (2024 to the present): the frontier, with conditions.** DeepSeek-V3 is the first validation of FP8 as the *compute* format at frontier scale, and the report is precise about what made it work. The first element is **fine-grained scaling**: activations are scaled per 1×128 tile and weights per 128×128 block, so that one outlier does not distort the scale of a whole tensor. The second is **promotion of accumulations to higher precision at short intervals**: partial sums are moved to FP32 registers every $N_C = 128$ elements, because accumulation inside the tensor cores alone retained too few bits on their hardware. Sensitive components stay in higher precision. On H800s, FP8 in principle doubles matrix-multiply throughput over BF16, which accounts for a large part of the cost arithmetic in Ch. 2. The general lesson is that **FP8 is not a configuration flag. It is a design for scaling granularity and accumulation policy.** A team that is not prepared to own that design should stay in BF16 and give up nothing except some throughput.
 
-Per parameter, naive mixed-precision AdamW training costs roughly: 2 bytes weights (BF16) + 2-4 bytes gradients + 8 bytes Adam moments (FP32 m and v) + 4 bytes FP32 master weights ≈ **16-18 bytes/param**, before activations. A 70B model is therefore ~1.2TB of state: hence sharding (ZeRO/FSDP, Ch. 10), activation checkpointing (recompute activations in backward instead of storing them), and the empirical sanity check from BLOOM: a full 176B checkpoint with optimizer state is 2.3TB, ~13 bytes/param on disk (BF16 weights alone: 329GB). When planning storage and restart times, these are the numbers to scale from.
+### 9.2 Training memory accounting
 
-## 10. Distributed training: the parallelism zoo and real MFU
+Per parameter, mixed-precision AdamW training costs roughly 2 bytes for weights (BF16), 2-4 bytes for gradients, 8 bytes for the Adam moments (FP32 $m$ and $v$), and 4 bytes for the FP32 master weights: **about 16-18 bytes per parameter, before activations**. A 70B model therefore carries about 1.2TB of state. This is the reason for sharding (ZeRO and FSDP, Ch. 10) and for activation checkpointing (recomputing activations in the backward pass instead of storing them). BLOOM provides an empirical check: a full 176B checkpoint with optimizer state is 2.3TB, about 13 bytes per parameter on disk, while the BF16 weights alone are 329GB. Storage and restart times should be planned from these figures.
+
+**References:**
+- DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
+- OPT: Open Pre-trained Transformer Language Models: https://arxiv.org/abs/2205.01068
+- GLM-130B: https://arxiv.org/abs/2210.02414
+- BLOOM model card (checkpoint sizes): https://huggingface.co/bigscience/bloom
+
+## 10. Distributed Training: Parallelism Strategies and Measured MFU
 
 ### 10.1 Parallelism dimensions
 
 Training parallelism comes down to what is split: the batch, the optimizer and parameter state, individual weight matrices, the layer stack, or the experts.
 
-- **Data parallelism (DP):** replicate the model, split the batch, all-reduce gradients. Scales easily; memory-hungry until you shard.
-- **ZeRO / FSDP:** still data parallelism, but optimizer state (stage 1), gradients (2), and parameters (3) are sharded across ranks and gathered just-in-time. This is how OPT ran (FSDP with FP32 Adam state sharded across hosts) and how most sub-100B training runs today.
-- **Tensor parallelism (TP):** split individual weight matrices across GPUs; requires communication inside every layer, so it lives where bandwidth is highest. SmolLM3 used TP=2 strictly intra-node over NVLink, with DP across nodes over EFA, precisely because inter-node bandwidth is an order of magnitude worse: the bandwidth hierarchy dictates the parallelism map, not the other way around.
-- **Pipeline parallelism (PP):** split layers into stages; the cost is "bubbles" of idle time at batch boundaries, managed with micro-batching and clever schedules. DeepSeek's DualPipe redesigned the schedule to overlap forward/backward computation with communication specifically because their H800s' restricted interconnect made hiding communication existential.
-- **Expert parallelism (EP):** the dimension specific to MoE: experts distributed across GPUs, tokens routed via all-to-all. Combines with all of the above and is the dominant communication cost in large MoE training.
+- **Data parallelism (DP):** replicate the model, split the batch, and all-reduce the gradients. It scales easily and is memory-hungry until the state is sharded.
+- **ZeRO and FSDP:** still data parallelism, but the optimizer state (stage 1), the gradients (stage 2), and the parameters (stage 3) are *sharded* across ranks and gathered just in time. This is how OPT ran (FSDP with the FP32 Adam state sharded across hosts) and how most training below 100B parameters runs today.
+- **Tensor parallelism (TP):** split individual weight matrices across GPUs. It requires communication inside every layer, so it is placed where bandwidth is highest. SmolLM3 used TP=2 strictly within a node over NVLink, with data parallelism across nodes over EFA, because inter-node bandwidth is an order of magnitude lower. **The bandwidth hierarchy dictates the parallelism layout, and not the reverse.**
+- **Pipeline parallelism (PP):** split the layers into stages. The cost is idle time ("bubbles") at batch boundaries, which is managed with micro-batching and scheduling. DeepSeek's DualPipe redesigned the schedule to overlap forward and backward computation with communication, because the restricted interconnect of the H800 made hiding communication essential.
+- **Expert parallelism (EP):** the dimension specific to MoE. Experts are distributed across GPUs, and tokens are routed by all-to-all communication. It combines with all of the above and is the dominant communication cost in large MoE training.
 
-Big runs compose them: Llama 3.1 405B ran 4D parallelism (TP × PP × context parallel × DP) across 16,384 GPUs.
+Large runs compose these dimensions. Llama 3.1 405B ran 4D parallelism (TP × PP × context parallelism × DP) across 16,384 GPUs.
 
-### 10.2 MFU is an engineering scoreboard, and MegaScale is the reference
+### 10.2 MFU in production: the MegaScale reference
 
-ByteDance's MegaScale (NSDI'24) is the best public account of squeezing MFU in production: 55.2% on a 175B model across 12,288 GPUs, a 1.34× improvement over stock Megatron-LM, achieved by full-stack co-design (overlapped communication, fused operators, data-pipeline optimization, network tuning) plus something less glamorous that Sec. 10.3 covers: deep observability, because at that scale **a single straggler GPU silently caps the whole job**. Their numbers also calibrate expectations: a heroic production effort lands near 55%; a good small-team run (SmolLM3) lands near 30% end-to-end even with kernel-level matmuls at 72-77% of peak. If your first multi-node run shows 25%, you are normal, and the gap decomposes into: communication exposure (overlap it), input pipeline stalls (prefetch, pre-tokenize), kernel inefficiency (fused attention and MLP kernels), and stragglers.
+ByteDance's MegaScale (NSDI 2024) is the best public account of raising MFU in production: **55.2% on a 175B model across 12,288 GPUs**, a 1.34× improvement over Megatron-LM. It was achieved through full-stack co-design (overlapped communication, fused operators, data-pipeline optimization, network tuning) and through deep observability, discussed in Sec. 10.3, because at that scale a single slow GPU silently limits the whole job. The figures also calibrate expectations. A major production effort reaches about 55%. A good run by a small team (SmolLM3) reaches about 30% end to end, even with matrix-multiply kernels at 72-77% of peak. A first multi-node run at 25% is normal, and the gap decomposes into exposed communication (overlap it), input-pipeline stalls (prefetch and pre-tokenize), kernel inefficiency (fused attention and MLP kernels), and stragglers.
 
-### 10.3 The unglamorous 20%: storage, checkpoints, observability
+### 10.3 Storage, checkpointing, and observability
 
-- **Checkpointing math.** Time-to-write scales with state size (Sec. 9.2) over storage bandwidth; if it stalls training, you either checkpoint less often (raising expected lost work per failure, Ch. 11) or fix I/O. Storage can also throttle the data path: during SmolLM3's run, throughput collapsed because the shared network filesystem (Weka, backed by S3) began evicting shards of the 24TB training dataset. The fix was to copy the dataset onto each node's local NVMe RAID and to keep a spare node preloaded with it, so that replacing a failed node cost no download time. The pattern worth copying: training data and hot checkpoints on node-local NVMe, durable copies in object storage, and no shared filesystem in the critical path.
-- **Dataloading is a correctness surface, not just a throughput one.** The Smol playbook's horror stories are dataloader bugs at 2am, and the single most expensive bug of the project was in parallelism plumbing: **all tensor-parallel ranks were initialized with the same RNG seed**, silently degrading learning; the model underperformed its smaller predecessor, and after the hunt they restarted the run, having spent 1T tokens. Determinism tests (same seed → same loss for 100 steps under every parallelism config; different-where-required seeds verified per rank) are cheaper than that.
-- **Observability.** MegaScale instruments deep into the stack (per-rank timing, collective-communication tracing, hardware counters) because at 10K+ GPUs, "it feels slow" has ten thousand possible causes. Even at 8 GPUs, keep per-rank step timings; your first straggler will be one bad DIMM or a thermally throttling card, and averaged metrics hide it.
+- **Checkpointing arithmetic.** The time to write a checkpoint scales with the state size (Sec. 9.2) divided by the storage bandwidth. If checkpointing stalls training, the choices are to checkpoint less often (which raises the expected work lost per failure, Ch. 11) or to fix the I/O path. Storage can also throttle the data path: during SmolLM3's run, throughput collapsed because the shared network filesystem (Weka, backed by S3) began evicting shards of the 24TB training dataset. The fix was to copy the dataset onto each node's local NVMe RAID and to keep a spare node preloaded with it, so that replacing a failed node cost no download time. The pattern to copy is training data and hot checkpoints on node-local NVMe, durable copies in object storage, and no shared filesystem in the critical path.
+- **Data loading is a correctness surface, not only a throughput one.** The single most expensive defect of the SmolLM3 project was in the parallelism code: **all tensor-parallel ranks were initialized with the same random seed**, which silently degraded learning. The model underperformed its smaller predecessor at the same stage of training, and after the investigation the team **restarted the run, having spent 1T tokens**. Determinism tests (the same seed gives the same loss for 100 steps under every parallelism configuration, and seeds that must differ are verified per rank) are far cheaper than that.
+- **Observability.** MegaScale instruments the stack deeply (per-rank timing, tracing of collective communication, hardware counters), because at more than 10,000 GPUs a complaint that training "feels slow" has ten thousand possible causes. Even at 8 GPUs, per-rank step timings should be kept. The first straggler is often one faulty DIMM or a thermally throttled card, and averaged metrics hide it.
 
-## 11. Hardware reliability: a failure every three hours
+**References:**
+- MegaScale: Scaling Large Language Model Training to More Than 10,000 GPUs: https://arxiv.org/abs/2402.15627
+- The Llama 3 Herd of Models: https://arxiv.org/abs/2407.21783
+- DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
+- OPT: Open Pre-trained Transformer Language Models: https://arxiv.org/abs/2205.01068
+- ZeRO: Memory Optimizations Toward Training Trillion Parameter Models: https://arxiv.org/abs/1910.02054
+- Megatron-LM: https://arxiv.org/abs/1909.08053
+- The Smol Training Playbook (Hugging Face): https://huggingface.co/spaces/HuggingFaceTB/smol-training-playbook
+- SmolLM3 (Hugging Face blog): https://huggingface.co/blog/smollm3
 
-Synchronous training has a brutal property: the job moves at the speed of its sickest GPU, and one dead component stops all of them. The public record now includes exact failure statistics, and they should shape how you design any run longer than a day.
+## 11. Hardware Reliability at Scale
 
-### 11.1 The Llama 3.1 405B reliability report, the industry's baseline dataset
+Synchronous training has a harsh property: the job runs at the speed of its slowest GPU, and one failed component stops all of them. The public record now includes exact failure statistics, and they should shape the design of any run longer than a day.
 
-Over a 54-day pretraining window on 16,384 H100s, Meta recorded **466 job interruptions**: 47 planned (maintenance) and **419 unexpected**, i.e. one unexpected failure roughly every three hours. The paper's breakdown of the 419 attributes 58.7% to GPU issues: 148 faulty-GPU interruptions, 72 HBM3 memory failures (17.2%), plus GPU SRAM (4.5%) and GPU system-processor (4.1%) issues; network switches and cables contributed 8.4%; and there were exactly **2 CPU failures** in 54 days. (The paper's table prints 30.1% beside the 148 faulty-GPU count, but 148/419 is 35.3%; every other row matches its count, and the 58.7% total is the sum of the printed percentages. Computed from the counts, the GPU share is 64%.) The asymmetry is the point: a 700W accelerator under thermal stress fails orders of magnitude more often than a CPU. Despite all this, only 3 incidents needed significant manual intervention (the rest handled by automation) and effective training time stayed above 90%. Two more operational details worth knowing because they surprise people: diurnal temperature swings alone moved throughput 1-2%, and the synchronized power draw of 16K GPUs swings tens of megawatts, enough to stress a data center's grid interface.
+### 11.1 The Llama 3.1 405B reliability data
 
-Scale that failure rate mentally: clusters of 100K+ GPUs at the same per-component rates see failures many times per hour, which is why fault tolerance, not peak FLOPs, is the actual frontier of training infrastructure. Other datapoints agree on magnitude. Meta's study of its two A100 research clusters (16K and 8K GPUs, 11 months) measured a mean time to failure of 7.9 hours for 1,024-GPU jobs, and its failure model projects 1.8 hours at 16,384 GPUs and about 14 minutes at 131,072. For H200-generation hardware, Crusoe presented four months of fault data from a cluster reported as 1,600 H200s at GTC 2025; Glenn Lockwood's analysis of that slide estimates about 205 failures in the period, a system mean time to interrupt of roughly 14 hours.
+Over a 54-day pretraining window on 16,384 H100s, Meta recorded **466 job interruptions**: 47 planned (maintenance) and **419 unexpected**, which is one unexpected interruption roughly every three hours. The paper's breakdown of the 419 attributes 58.7% to GPU issues: 148 faulty-GPU interruptions, 72 HBM3 memory failures (17.2%), and GPU SRAM (4.5%) and GPU system-processor (4.1%) issues. Network switches and cables contributed 8.4%, and there were exactly **2 CPU failures** in 54 days. (The paper's table prints 30.1% beside the count of 148 faulty-GPU interruptions, but 148/419 is 35.3%. Every other row matches its count, and the 58.7% total is the sum of the printed percentages. Computed from the counts, the GPU share is 64%.) The asymmetry is the central observation: a 700W accelerator under thermal stress fails orders of magnitude more often than a CPU. Despite these failures, only 3 incidents required significant manual intervention, the remainder were handled by automation, and **effective training time stayed above 90%**. Two further operational details are frequently overlooked. Diurnal temperature variation alone changed throughput by 1-2%. The synchronized power draw of 16,000 GPUs swings by tens of megawatts, which is enough to stress a data center's grid interface.
 
-### 11.2 The OPT logbook: what failure looks like from inside
+At the same per-component failure rates, clusters of more than 100,000 GPUs see failures many times per hour, which is why fault tolerance, and not peak FLOPs, is the practical frontier of training infrastructure. Other datapoints agree on the magnitude. Meta's study of its two A100 research clusters (16K and 8K GPUs, 11 months) measured a mean time to failure of 7.9 hours for 1,024-GPU jobs, and its failure model projects 1.8 hours at 16,384 GPUs and about 14 minutes at 131,072. For H200-generation hardware, Crusoe presented four months of fault data from a cluster reported as 1,600 H200s at GTC 2025. [Glenn Lockwood's analysis](https://blog.glennklockwood.com/2025/03/gtc-2025-recap.html) of that slide estimates about 205 failures in the period, a system mean time to interrupt of roughly 14 hours.
 
-Meta's OPT-175B chronicles (published raw, and worth an evening of your life) put textures on the statistics across 992 A100s and two months: **35+ manual restarts and over 100 hosts cycled**, machines dying at a rate of a couple per day, and a symptom taxonomy every practitioner eventually meets:
+### 11.2 The OPT-175B logbook: failure modes in operation
 
-1. **NCCL/InfiniBand errors** ("Got completion with error", mlx5 completion errors): fabric-level packet loss or a flaky link; a heavy contributor at every scale.
-2. **"GPU is lost"**: unrecoverable device failure; the node reboots or leaves the pool.
-3. **The silent hang**: the worst one. No error, the log just stops; some collective is deadlocked or a process wedged, and debugging means ssh-ing across nodes with nvidia-smi and stack dumps. Modern stacks attack this with watchdog timeouts on collectives and flight-recorder tracing.
+Meta's OPT-175B chronicles, published unedited, give the statistics an operational texture. Across 992 A100s and two months they record **at least 35 manual restarts and more than 100 hosts cycled**, machines failing at a rate of a few per day, and a set of symptoms that every practitioner eventually encounters:
 
-The organizational arc of the logbook is as instructive as the technical one: the team started with humans on call restarting things by hand (including through a holiday cluster outage), progressively glued monitoring and health checks into **fully automated recovery** (8 hardware failures auto-recovered over one holiday week), and set the explicit goal of *14 days at 175B scale with zero human intervention* so the on-call role could be dissolved. That is the maturity curve every training org walks; the only choice is how many pages of pain before automating.
+- **NCCL and InfiniBand errors** ("Got completion with error", mlx5 completion errors): packet loss at the fabric level, or an unreliable link. These are a major contributor at every scale.
+- **"GPU is lost"**: an unrecoverable device failure. The node reboots or leaves the pool.
+- **The silent hang**: the most difficult case. No error is raised and the log stops. A collective is deadlocked or a process is stuck, and debugging requires logging into nodes individually with `nvidia-smi` and stack dumps. Current software stacks address this with watchdog timeouts on collectives and flight-recorder tracing.
 
-### 11.3 Designing for failure: the checklist
+The organizational progression in the logbook is as instructive as the technical one. The team began with engineers on call who restarted jobs by hand, including through a cluster outage during a holiday. They progressively connected monitoring and health checks into fully automated recovery, recovering automatically from 8 hardware failures between Christmas and New Year. They then set the explicit goal of training at 175B scale for 14 days without human intervention, so that the on-call role could be dissolved. Every training organization follows this maturity curve. The only variable is how much manual recovery is endured before it is automated.
 
-- **Checkpoint cadence by expected-loss math.** With mean time between failures $M$ and checkpoint interval $T$, expected lost work per failure ≈ $T/2$; total overhead ≈ (write time) / $T$ + $T/(2M)$, minimized around $T \approx \sqrt{2 \cdot M \cdot t_{write}}$. With Llama-3-like $M \approx 3$ h and a 5-minute write, that lands near every 30-45 minutes. Fast NVMe checkpointing (Sec. 10.3) moves the optimum toward more frequent saves.
-- **Spares in the pool.** BLOOM ran 48 nodes with 4 hot-spare nodes; OPT maintained a replenished buffer pool. Budget spare capacity from day one; sourcing replacement nodes mid-run is how you lose a week.
-- **Health-gate before resume.** OPT's restarts included diagnostic sweeps to eject bad nodes before rejoining; resuming onto a half-broken node just schedules the next failure.
-- **Automate detection → drain → restart → notify.** The bar demonstrated publicly (LLM360 K2-V2's auto-detected spike with auto-restart and a Slack notification; Llama 3's 3-of-419 manual interventions) is achievable with unglamorous glue code.
-- **Watch for silent data corruption.** Faulty accelerators can corrupt training without crashing anything. Llama 3 attributes 6 of its 419 unexpected interruptions to silent data corruption, and Google's Gemini report expects such events to affect training every week or two at its scale, countering them with deterministic replay, proactive scanners on idle machines, and hot standbys. Periodic tensor checks inside the job are the complementary defense, and they cost throughput: ByteDance's MegaScale-Omni team began by checking all communication tensors, found the slowdown significant, and narrowed the checks to encoder outputs.
-- **Plan the grid.** If you operate your own cluster: synchronized load swings and cooling interact with facility limits well below hyperscale (Sec. 11.1's megawatt story has a kilowatt version in every on-prem server room).
+### 11.3 Designing for failure
+
+- **Set the checkpoint interval by expected loss.** With a mean time between failures $M$ and a checkpoint interval $T$, the expected work lost per failure is about $T/2$. The total overhead is about (write time) / $T$ + $T/(2M)$, which is minimized near $T \approx \sqrt{2 \cdot M \cdot t_{write}}$ (the Young-Daly formula). With a Llama-3-like $M \approx 3$ h and a 5-minute write, the optimum is near 40 minutes. Fast NVMe checkpointing (Sec. 10.3) moves the optimum toward more frequent saves.
+- **Keep spares in the pool.** BLOOM ran 48 nodes with 4 hot-spare nodes, and OPT maintained a replenished buffer pool. Spare capacity should be budgeted from the first day, because sourcing replacement nodes in the middle of a run can cost a week.
+- **Gate on health before resuming.** OPT's restarts included diagnostic sweeps that ejected faulty nodes before they rejoined. Resuming on a partly broken node only schedules the next failure.
+- **Automate detection, draining, restart, and notification.** The standard demonstrated publicly (LLM360 K2-V2's automatically detected spike with automatic restart and a Slack notification, and Llama 3's 3 manual interventions out of 419 interruptions) is achievable with ordinary engineering effort.
+- **Watch for silent data corruption.** Faulty accelerators can corrupt training without crashing anything. Llama 3 attributes 6 of its 419 unexpected interruptions to silent data corruption. Google's Gemini report expects such events to affect training every week or two at its scale, and counters them with deterministic replay, proactive scanners on idle machines, and hot standbys. Periodic tensor checks inside the job are the complementary defense, and they cost throughput: ByteDance's MegaScale-Omni team began by checking all communication tensors, found the slowdown significant, and narrowed the checks to encoder outputs.
+- **Plan for the facility.** For an organization that operates its own cluster, synchronized load swings and cooling interact with facility limits well below hyperscale. The megawatt-scale effects in Sec. 11.1 have a kilowatt-scale equivalent in every on-premises server room.
+
+**References:**
+- The Llama 3 Herd of Models (reliability section and interruption table): https://arxiv.org/abs/2407.21783
+- Revisiting Reliability in Large-Scale Machine Learning Research Clusters (Meta, HPCA 2025): https://arxiv.org/abs/2410.21680
+- OPT: Open Pre-trained Transformer Language Models: https://arxiv.org/abs/2205.01068
+- OPT-175B chronicles and logbook (metaseq): https://github.com/facebookresearch/metaseq/tree/main/projects/OPT/chronicles
+- BLOOM: https://arxiv.org/abs/2211.05100
+- Gemini: A Family of Highly Capable Multimodal Models (training infrastructure): https://arxiv.org/abs/2312.11805
+- MegaScale-Omni: https://arxiv.org/abs/2605.08962
+- K2-V2: A 360-Open, Reasoning-Enhanced LLM: https://arxiv.org/abs/2512.06201
+- Glenn Lockwood, GTC 2025 recap (Crusoe H200 fault data): https://blog.glennklockwood.com/2025/03/gtc-2025-recap.html
+- J. W. Young, "A first order approximation to the optimum checkpoint interval," Communications of the ACM 17(9), 1974: https://doi.org/10.1145/361147.361115
+- J. T. Daly, "A higher order estimate of the optimum checkpoint interval for restart dumps," Future Generation Computer Systems 22(3), 2006: https://doi.org/10.1016/j.future.2004.11.016
 
 ---
 
-# Part III: Mid-training and adaptation
+# Part III: Mid-Training and Adaptation
 
-## 12. Mid-training: annealing, curricula, and long context
+## 12. Mid-Training: Annealing, Curricula, and Long Context
 
-Mid-training is where "one big soup of tokens" became "a staged curriculum," and it is the highest-ROI idea a small team can steal from frontier reports, because it costs a fraction of pretraining and moves benchmarks disproportionately.
+Mid-training is the point at which pretraining changed from a single undifferentiated mixture of tokens to a staged curriculum. It is the highest-return idea that a small team can adopt from frontier reports, because it costs a fraction of pretraining and improves benchmarks disproportionately.
 
-**The pattern across labs.** OLMo 2 trains a first stage on a broad web-dominated mixture, then restarts from that checkpoint on domain-specific mixes (math-heavy, curated high-quality) while driving the learning rate linearly to zero; their "microannealing" runs are miniature versions used to score candidate data (Sec. 3.2). Qwen3 makes it three explicit stages: >30T general tokens, ~5T STEM/code/reasoning-dense tokens, then long-context data at 32K. Kimi K2 ends its 15.5T-token run with a 400B-token annealing phase (LR 2e-5 → 7e-6) followed by a 60B-token 32K-sequence stage. SmolLM3 runs three stages with the mixture upgraded as the WSD decay begins. The shared logic: **the decay phase is when the model consolidates; feed it your best tokens then.** High-quality data spent early gets partially overwritten; spent late, it sticks.
+**The pattern across laboratories.** OLMo 2 trains a first stage on a broad, web-dominated mixture, and then restarts from that checkpoint on domain-specific mixtures (mathematics-heavy and curated high-quality data) while driving the learning rate linearly to zero. Its microannealing runs are small versions of the same procedure, used to score candidate data (Sec. 3.2). Qwen3 uses three explicit stages: more than 30T general tokens, about 5T tokens dense in STEM, code, and reasoning, and then long-context data at 32K. Kimi K2 ends its 15.5T-token run with a 400B-token annealing phase (learning rate 2e-5 to 7e-6) followed by a 60B-token stage at a sequence length of 32K. SmolLM3 runs three stages, with the mixture upgraded as the WSD decay begins. The shared logic is that **the decay phase is when the model consolidates, so it should receive the best tokens.** High-quality data used early is partly overwritten. Used late, it persists.
 
-**Long-context extension is cheap and late.** The recipe that recurs: train almost everything at short context (4K), then a brief stage on genuinely long documents at 32K, then extrapolate the RoPE geometry (YaRN and relatives) to the advertised window (K2: 60B tokens at 32K, YaRN to 128K). Two cautions from the collective experience: long-context data must be *naturally* long documents, not concatenation soup, or the model learns to ignore distance; and every advertised window should be verified with retrieval-style evals at full depth, because extension tricks degrade gracefully and silently.
+**Long-context extension is inexpensive and late.** The recurring recipe is to train almost everything at a short context (4K), then run a brief stage on naturally long documents at 32K, and then extrapolate the RoPE geometry (YaRN and related methods) to the advertised window (Kimi K2: 60B tokens at 32K, then YaRN to 128K). Two cautions emerge from the collective experience. Long-context data must consist of *naturally* long documents, not concatenated short ones, or the model learns to ignore distant context. Every advertised window should also be verified with retrieval-style evaluations at full depth, because extension methods degrade gradually and without obvious symptoms.
 
-**Why this matters to you.** If you hold an open base model and a modest cluster, "mid-training-style continued pretraining" (a few tens of billions of curated domain tokens ridden down a decay schedule) is frequently the best capability-per-dollar move available, and it is exactly the mechanism behind language adaptation, next chapter.
+**Relevance to smaller teams.** For a team that holds an open base model and a modest cluster, continued pretraining in the style of mid-training (a few tens of billions of curated domain tokens, trained through a decay schedule) is frequently the best available improvement per dollar. It is also the mechanism behind language adaptation, the subject of the next chapter.
 
-## 13. Continued pretraining and new-language adaptation: the Arabic deep dive
+**References:**
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- Qwen3 Technical Report: https://arxiv.org/abs/2505.09388
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- SmolLM3 (Hugging Face blog): https://huggingface.co/blog/smollm3
+- YaRN: Efficient Context Window Extension of Large Language Models: https://arxiv.org/abs/2309.00071
 
-This chapter is the handbook's center of gravity for MENA readers: the complete decision space for making a model genuinely good at Arabic (or any underserved language), reconstructed from the published record of Jais, AceGPT, ALLaM, Kuwain, RightNow-Arabic, and the general continued-pretraining literature. The same playbook applies to any domain adaptation (legal, medical, dialectal speech transcripts); Arabic just supplies the hardest, best-documented version.
+## 13. Continued Pretraining and New-Language Adaptation: The Arabic Case
+
+This chapter is the center of the handbook for readers in the Middle East and North Africa. It sets out the decision space for making a model good at Arabic, or at any underserved language, reconstructed from the published record of Jais, AceGPT, ALLaM, Kuwain, and RightNow-Arabic and from the general literature on continued pretraining. The same procedure applies to domain adaptation (legal, medical, dialectal speech transcripts). Arabic supplies the most demanding and best-documented case.
 
 ### 13.1 The three strategic paths
 
-**Path A: from scratch, bilingual by design (Jais, 2023; ALLaM's larger models).** Jais trained a 13B GPT-3-style decoder from random init on 395B tokens with Arabic deliberately not minoritized: 72B unique Arabic tokens (the largest Arabic corpus assembled at the time), upsampled to ~116B effective (~1.6 epochs), against English and code at roughly a 1:2 Arabic:English ratio, with a purpose-built balanced bilingual tokenizer. The bet, which paid off, was cross-lingual transfer: abundant English supplies world knowledge and reasoning while Arabic anchors the linguistic space, and the model beat existing open models on Arabic by a wide margin while staying competitive in English. Cost profile: the highest of the three paths; you pay full pretraining prices (Ch. 2) and own every problem in this book. The follow-up Jais family (2024) scaled the approach to 20 models, 590M-70B, up to 1.6T tokens, and, tellingly, shipped *both* from-scratch and Llama-2-adapted variants, an implicit admission that Path B had become competitive.
+**Path A: from scratch, bilingual by design (Jais, 2023, and ALLaM's from-scratch model).** Jais trained a 13B GPT-3-style decoder from random initialization on 395B tokens, with Arabic deliberately given a large share: 72B unique Arabic tokens (the largest Arabic corpus assembled at the time), upsampled to about 116B (roughly 1.6 epochs), against English and code at an Arabic-to-English ratio of roughly 1:2, with a purpose-built balanced bilingual tokenizer. The premise, which the results supported, was cross-lingual transfer: abundant English supplies world knowledge and reasoning while Arabic anchors the linguistic space. The model outperformed existing open models on Arabic by a wide margin while remaining competitive in English. The cost profile is the highest of the three paths: full pretraining prices (Ch. 2) and exposure to every problem in this handbook. The follow-up Jais family (2024) scaled the approach to 20 models from 590M to 70B parameters, trained on up to 1.6T tokens, and released *both* from-scratch and Llama-2-adapted variants, which indicates that Path B had become competitive.
 
-**Path B: continued pretraining of a strong open base (AceGPT, 2023; ALLaM 7B-continued; the default 2026 answer).** AceGPT continued Llama-2 (7B/13B) on Arabic-majority mixtures (60-64% Arabic) of 30B/10B tokens respectively, then localized post-training (Arabic instructions, RLAIF for cultural alignment): a fraction of from-scratch cost for most of the benefit. ALLaM's team ran the most informative comparison: they first adapted Llama-2 via tokenizer/vocabulary expansion plus 1.2T tokens of mixed Arabic-English continued pretraining (600B for the 70B), *then* applied the learned recipe from scratch, and reported the from-scratch 7B improving significantly over the continued 7B. The comparison is reported briefly and is not compute-matched: the from-scratch model saw 4T English tokens followed by the same 1.2T mixed tokens, against Llama-2's 2T plus 1.2T. Read carefully, that result says: adaptation is the fast, cheap 90%; from-scratch is the expensive last 10%, worth it mainly at national-program budgets. For everyone else, Path B on a 2026-class base (Qwen3, Llama, Gemma) starts from a far stronger prior than Llama-2 ever offered.
+**Path B: continued pretraining of a strong open base (AceGPT, 2023, the Llama-2-based ALLaM models, and the default choice in 2026).** AceGPT continued Llama-2 (7B and 13B) on Arabic-majority mixtures (60-64% Arabic) of 30B and 10B tokens respectively, followed by localized post-training (Arabic instructions, and RLAIF with a reward model tuned to local culture and values). This obtains most of the benefit for a fraction of the from-scratch cost. ALLaM's team ran the most informative comparison. They first adapted Llama-2 through tokenizer and vocabulary expansion and 1.2T tokens of mixed Arabic-English continued pretraining (600B for the 70B model), *then* applied the recipe from scratch, and reported that the from-scratch 7B improved significantly over the continued 7B. The comparison is reported briefly and is not compute-matched: the from-scratch model saw 4T English tokens followed by the same 1.2T mixed tokens, against Llama-2's 2T plus 1.2T. A careful reading is that adaptation delivers most of the result quickly and cheaply, and that training from scratch obtains the remainder at a price justified mainly at national-program budgets. For other organizations, Path B on a 2026-class base (Qwen3, Llama, Gemma) starts from a far stronger prior than Llama-2 offered.
 
-**Path C: surgical small-model adaptation (Kuwain, 2025; RightNow-Arabic-0.5B, 2026).** The budget tier, and the most instructive for teams with single-node clusters. Kuwain-1.5B extended TinyLlama-1.1B in two ways at once: 26K new Arabic tokens in the tokenizer, and 8 new decoder layers trained on 110B tokens (90B Arabic, 20B English) with the original layers frozen (except the last, kept trainable for stability). The Arabic benchmark average rose from 36.95 to 44.49 and English held (52.99 to 53.28). The frozen backbone matters: the paper's own ablation with vocabulary expansion and ordinary continued pretraining, without the new layers, reached comparable Arabic scores but dropped the English average to 46.85. RightNow-Arabic-0.5B-Turbo documents the full modern micro-recipe: inject 27,032 Arabic tokens into Qwen2.5-0.5B, continue pretraining on ~504M Arabic tokens, SFT with response-only loss masking, DPO, then a linear merge of the pretrain, SFT, and DPO checkpoints (25/25/50), exported to GGUF for edge (398MB at 4-bit, 635 tok/s on one H100 at batch 1, phone-capable). Total compute: a single 8×H100 node for under eight hours. The reported gains are correspondingly modest: mean accuracy 35.9 against 34.1 for Qwen2.5-0.5B-Instruct, with COPA-ar and HellaSwag-ar up 4.5 and 3.5 points and ArabicMMLU down 2.8. This tier exists because of everything Paths A/B learned; it is the trickle-down.
+**Path C: targeted adaptation of a small model (Kuwain, 2025, and RightNow-Arabic-0.5B, 2026).** This is the budget tier and the most instructive one for teams with a single node. Kuwain-1.5B extended TinyLlama-1.1B in two ways at once: 26K new Arabic tokens in the tokenizer, and 8 new decoder layers trained on 110B tokens (90B Arabic, 20B English) with the original layers frozen, except the last, which was kept trainable for stability. The Arabic benchmark average rose from 36.95 to 44.49, and English held (52.99 to 53.28). The frozen backbone matters: the paper's own ablation with vocabulary expansion and ordinary continued pretraining, without the new layers, reached comparable Arabic scores but reduced the English average to 46.85. RightNow-Arabic-0.5B-Turbo documents a complete small-scale recipe: add 27,032 Arabic tokens to Qwen2.5-0.5B, continue pretraining on about 504M Arabic tokens, run SFT with response-only loss masking, run DPO, merge the pretrain, SFT, and DPO checkpoints linearly (25/25/50), and export to GGUF for edge devices (398MB at 4 bits, 635 tokens per second on one H100 at batch size 1). Total compute was one 8×H100 node for under eight hours. The reported gains are correspondingly modest: a mean accuracy of 35.9 against 34.1 for Qwen2.5-0.5B-Instruct, with COPA-ar and HellaSwag-ar up 4.5 and 3.5 points and ArabicMMLU down 2.8. This tier exists because of what Paths A and B established.
 
 ### 13.2 The vocabulary-expansion operation, step by step
 
-The recurring mechanical core of Paths B and C, assembled from ALLaM, Kuwain, and RightNow:
+The recurring mechanical core of Paths B and C, assembled from ALLaM, Kuwain, and RightNow-Arabic:
 
-1. **Train an Arabic (or merge a bilingual) tokenizer** and select which new tokens to add. More tokens = better fertility but a bigger embedding matrix; at 0.5B scale RightNow chose ~27K tokens as the sweet spot, while ALLaM merged a full Arabic tokenizer into Llama-2's, bringing Arabic fertility down to the level of an Arabic-only tokenizer. For scale, Gosal et al. measured Llama-2's Arabic fertility falling from 5.06 to 1.41 tokens per word after adding 32K Arabic tokens (Ch. 4), a 72% cut in the token cost of every subsequent Arabic training and inference step.
-2. **Extend the embedding and output matrices**, initializing each new token's vectors from the mean of the embeddings of its old-tokenizer decomposition (tokenize the new token's string with the *old* tokenizer, average those pieces): the subtoken-mean initialization (Fast Vocabulary Transfer, Gee et al., 2022) that ALLaM and RightNow both use; Kuwain's paper does not state how its new embeddings were initialized. ALLaM reports much faster learning with it than with random initialization. Random init here measurably slows adaptation; you would be forcing the model to relearn what it already knows under new names.
-3. **Continue pretraining on a mixed corpus, never a pure one.** The forgetting problem is real and the antidote is *anchoring*: ALLaM argues explicitly that vocabulary expansion paired with continued English presence in the mixture is what prevents catastrophic forgetting of the base model's abilities. Ratios in the record run from Arabic-dominant-with-English-anchor (AceGPT) to ~1:1 blends; the honest answer is that your replay ratio is an ablation (Sec. 5.3), with 10-30% original-distribution data as the common starting band in the broader continued-pretraining literature. Replay alone may not be enough at small scale: in Kuwain's ablation, plain continued pretraining after vocabulary expansion lost about six points of English average (52.99 to 46.85), while training only inserted layers over a frozen backbone held English steady.
-4. **Treat the learning rate as an open question.** The published evidence conflicts. ALLaM ran all continued pretraining at the base model's final learning rate (3e-5 for Llama-2) and reports that schedules which re-warmed and then decayed the rate had limited success and typically caused forgetting of English. Gosal et al., adapting the same Llama-2 base, found the opposite: re-warming to the full peak of 3e-4 with 1% linear warmup and cosine decay worked best, on a 9:1 Arabic:English mix. The two studies differ in mixture and token budget, so neither result transfers blindly. Re-warming does perturb a converged optimizer state (the mechanisms of Ch. 8 apply), so start low and raise the rate only when an ablation shows a gain.
-5. **Watch both directions.** Evaluate Arabic *and* the original languages every few billion tokens; forgetting shows up first in the tails (code, math word problems) before headline English benchmarks move.
+1. **Train an Arabic tokenizer, or merge a bilingual one,** and select the new tokens to add. More tokens give better fertility and a larger embedding matrix. At 0.5B scale RightNow-Arabic chose about 27K tokens, while ALLaM merged a full Arabic tokenizer into Llama-2's, which brought Arabic fertility down to the level of an Arabic-only tokenizer. For scale, Gosal et al. measured Llama-2's Arabic fertility falling from 5.06 to 1.41 tokens per word after adding 32K Arabic tokens (Ch. 4), a 72% reduction in the token cost of every subsequent Arabic training and inference step.
+2. **Extend the embedding and output matrices,** initializing each new token's vectors from the mean of the embeddings of its decomposition under the old tokenizer: tokenize the new token's string with the *old* tokenizer and average those rows. This is subtoken-mean initialization (Fast Vocabulary Transfer, Gee et al., 2022), which ALLaM and RightNow-Arabic both use. Kuwain's paper does not state how its new embeddings were initialized. ALLaM reports much faster learning with this method than with random initialization. Random initialization slows adaptation because it forces the model to relearn, under new names, what it already knows.
+3. **Continue pretraining on a mixed corpus, never a pure one.** Catastrophic forgetting is real, and the remedy is *anchoring*. ALLaM argues explicitly that vocabulary expansion combined with a continued English presence in the mixture is what prevents forgetting of the base model's abilities. The recorded ratios run from an Arabic majority with an English anchor (AceGPT) to blends near 1:1, and ALLaM reports that 45% Arabic to 55% English worked best in its setting. The replay ratio should be treated as an ablation (Sec. 5.3), with 10-30% original-distribution data as the common starting range in the broader literature on continued pretraining. Replay alone may not be enough at small scale: in Kuwain's ablation, ordinary continued pretraining after vocabulary expansion lost about six points of English average (52.99 to 46.85), while training only inserted layers over a frozen backbone held English steady.
+4. **Treat the learning rate as an open question.** The published evidence conflicts. ALLaM ran all continued pretraining at the base model's final learning rate (3e-5 for Llama-2) and reports that schedules which re-warmed and then decayed the rate had limited success and typically caused forgetting of English. Gosal et al., adapting the same Llama-2 base, found the opposite: re-warming to the full peak of 3e-4 with 1% linear warmup and cosine decay worked best, on a 9:1 Arabic-to-English mixture. The two studies differ in mixture and token budget, so neither result transfers without testing. Re-warming perturbs a converged optimizer state (the mechanisms of Ch. 8 apply), so the prudent procedure is to start low and raise the rate only when an ablation shows a gain.
+5. **Evaluate in both directions.** Evaluate Arabic *and* the original languages every few billion tokens. Forgetting appears first in the tails (code, mathematical word problems) before headline English benchmarks move.
 
-### 13.3 Data reality for Arabic (and the translated-data question)
+### 13.3 Arabic data supply and translated data
 
-ALLaM's Arabic corpus is 540B tokens, and only half of it is natural: 270B tokens of curated Arabic, a large engineering effort given the public Arabic web (Sec. 3.3), plus 270B tokens machine-translated from English sources with an in-house translation system. The choice is controversial but supported by their ablations, which show translated data reducing gradient spikes and helping to align Arabic and English capability. Jais's Arabic likewise included a substantial translated share. The pragmatic reading: translation artifacts (unnatural style, calqued idioms) are a real cost, paid knowingly, because token supply is the binding constraint; the mitigation is concentrating natural, native Arabic (and dialects) in the *late*, high-influence stages (Ch. 12's consolidation logic) and in post-training, where style is actually set. For dialects specifically (the gap between MSA benchmarks and how Gulf users actually type), the corpus problem is harder still, and the honest current answer is commissioned/annotated data rather than scraping (a data-operations problem, not a modeling one).
+ALLaM's Arabic corpus is 540B tokens, and only half of it is natural: 270B tokens of curated Arabic, a large engineering effort given the state of the public Arabic web (Sec. 3.3), and 270B tokens machine-translated from English sources with an in-house translation system. The choice is controversial but supported by the paper's ablations, which show translated data reducing gradient spikes and helping to align Arabic and English capability. Jais's Arabic likewise included a substantial translated share. The pragmatic reading is that translation artifacts (unnatural style, calqued idioms) are a real cost that is accepted knowingly, because token supply is the binding constraint. The mitigation is to concentrate natural, native Arabic, including dialects, in the *late* high-influence stages (Ch. 12) and in post-training, where style is set. For dialects specifically (the gap between MSA benchmarks and the way Gulf users type), the corpus problem is harder, and the current answer is commissioned and annotated data, not scraping. That is a data-operations problem, not a modeling one.
 
-### 13.4 The decision framework, condensed
+### 13.4 Decision framework
 
-| Your situation | Recommended path | Reference recipe |
+| Situation | Recommended path | Reference recipe |
 |---|---|---|
-| National program / 9-figure budget, sovereignty requirements | A (from scratch), after running B first as a de-risking study | ALLaM's sequence: adapt, learn, then scratch |
-| Company with a real cluster (hundreds of GPUs) and an Arabic product | B: vocab-expand + tens-to-hundreds of billions of mixed tokens on a 2026 open base + full post-training | AceGPT / ALLaM-continued, modernized base |
-| Team with 1-2 nodes | C: token injection (optionally with inserted layers over a frozen backbone) + continued pretraining sized to the budget (0.5B tokens in RightNow, 110B in Kuwain) + SFT/DPO | Kuwain, RightNow-Arabic |
-| Application team, no training mandate | None of the above: harvest the ecosystem (Jais family, ALLaM releases, SILMA, Fanar, Qwen3 multilingual) and spend your budget on evaluation and post-training data | Ch. 14-17 |
+| National program with a nine-figure budget and sovereignty requirements | A (from scratch), after running B first as a de-risking study | ALLaM's sequence: adapt, learn, then train from scratch |
+| Company with a substantial cluster (hundreds of GPUs) and an Arabic product | B: vocabulary expansion, tens to hundreds of billions of mixed tokens on a 2026 open base, and full post-training | AceGPT and the Llama-2-based ALLaM, on a current base |
+| Team with one or two nodes | C: token injection (optionally with inserted layers over a frozen backbone), continued pretraining sized to the budget (0.5B tokens in RightNow-Arabic, 110B in Kuwain), and SFT with DPO | Kuwain, RightNow-Arabic |
+| Application team with no mandate to train | None of the above: use the existing ecosystem (the Jais family, ALLaM releases, SILMA, Fanar, Qwen3's multilingual models) and spend the budget on evaluation and post-training data | Ch. 14-17 |
 
-The trap to avoid at every tier: judging success by MSA benchmarks alone. The published models cluster on MMLU-style translated evals; they *diverge* on dialect handling, code-switching, diacritics robustness, and cultural grounding, which is where your users live and where your evaluation suite (Ch. 18) must go.
+The error to avoid at every tier is judging success by MSA benchmarks alone. The published models cluster together on translated MMLU-style evaluations. They *diverge* on dialect handling, code-switching, robustness to diacritics, and cultural grounding, which are the conditions under which users write, and which the evaluation suite (Ch. 18) must therefore cover.
+
+**References:**
+- Jais and Jais-chat: https://arxiv.org/abs/2308.16149
+- Jais family model card: https://huggingface.co/inceptionai/jais-family-30b-16k
+- AceGPT, Localizing Large Language Models in Arabic: https://arxiv.org/abs/2309.12053
+- ALLaM: Large Language Models for Arabic and English: https://arxiv.org/abs/2407.15390
+- Bilingual Adaptation of Monolingual Foundation Models (Gosal et al.): https://arxiv.org/abs/2407.12869
+- Kuwain 1.5B: An Arabic SLM via Language Injection: https://arxiv.org/abs/2504.15120
+- RightNow-Arabic-0.5B-Turbo: https://arxiv.org/abs/2605.28827
+- Fast Vocabulary Transfer for Language Model Compression (Gee et al.): https://aclanthology.org/2022.emnlp-industry.41/
+- Fanar: An Arabic-Centric Multimodal Generative AI Platform: https://arxiv.org/abs/2501.13944
+- Atlas-Chat (Moroccan Arabic adaptation): https://arxiv.org/abs/2409.17912
 
 ---
 
-# Part IV: Post-training
+# Part IV: Post-Training
 
-## 14. SFT that actually works
+## 14. Supervised Fine-Tuning
 
-SFT looks trivial (fine-tune on prompt-response pairs with the loss masked to responses) and is where most in-house model projects quietly fail, because its quality is almost entirely a data problem. The best-documented open recipe is Tulu 3 (Ai2), which is worth studying line by line because unlike most reports it publishes the data, the ablations, and the mistakes.
+SFT appears trivial: fine-tune on prompt-response pairs with the loss masked to the responses. It is nevertheless the stage at which most in-house model projects fail without noticing, because its quality is almost entirely a data problem. The best-documented open recipe is Tulu 3 (Ai2), which repays close study because, unlike most reports, it publishes the data, the ablations, and the mistakes.
 
-**The Tulu 3 data doctrine.** Start from explicit capability targets (knowledge, reasoning, math, coding, instruction-following, safety, multilinguality), then build the prompt pool per target: harvest the best existing open sets, generate targeted synthetic data (persona-driven generation at scale for coverage), and, critically, **decontaminate against your entire evaluation suite** before training, because leaked benchmark prompts in SFT data are the most common source of fake in-house wins. The final SFT mixture is on the order of a million curated prompt-response pairs, and its composition was tuned by ablation like a pretraining mixture (Ch. 3), not assembled once.
+**The Tulu 3 data method.** Start from explicit capability targets (knowledge, reasoning, mathematics, coding, instruction following, safety, multilinguality), and build the prompt pool for each target: collect the best existing open datasets, generate targeted synthetic data (persona-driven generation at scale, for coverage), and **decontaminate against the entire evaluation suite** before training. Benchmark prompts that leak into SFT data are the most common source of spurious in-house gains. The final SFT mixture contains on the order of one million curated prompt-response pairs, and its composition was tuned by ablation like a pretraining mixture (Ch. 3), not assembled once.
 
-**Quality beats quantity, with a caveat.** The LIMA-era result (a thousand excellent examples can set style/format) survives as a half-truth: format and tone are cheap to teach, but *capabilities* under SFT scale with high-quality coverage of the skill (Tulu's math and coding gains came from targeted volume, not vibes). Filtering with LLM judges is now standard plumbing: e.g., the Trillion-7B report scores the responses in its SFT pool with Qwen2.5-72B as judge and keeps only those rated above 3 on a 0-5 scale, a pattern repeated across 2025-2026 reports.
+**Quality outweighs quantity, with a qualification.** The LIMA result (a thousand excellent examples can set style and format) holds only in part. Format and tone are cheap to teach, but *capabilities* under SFT scale with high-quality coverage of the skill: Tulu's gains in mathematics and coding came from targeted volume. Filtering with LLM judges is now standard practice. For example, the Trillion-7B report scores the responses in its SFT pool with Qwen2.5-72B as judge and keeps only those rated above 3 on a 0-5 scale, a pattern repeated across the 2025-2026 reports.
 
-**Rejection sampling: SFT data from your own model.** DeepSeek-R1's pipeline shows the modern loop at full scale: after an RL stage, sample many responses per prompt from the RL checkpoint, keep only verified-correct ones (about 600K reasoning traces), add ~200K non-reasoning examples (writing, QA, translation), and run SFT on the resulting ~800K. The model becomes its own teacher wherever a verifier exists; humans curate where one doesn't.
+**Rejection sampling: SFT data from the model itself.** DeepSeek-R1's pipeline shows the current loop at full scale. After an RL stage, many responses per prompt are sampled from the RL checkpoint, only the verified-correct ones are kept (about 600K reasoning traces), about 200K non-reasoning examples are added (writing, question answering, translation), and SFT runs on the resulting 800K or so examples. The model becomes its own teacher wherever a verifier exists, and humans curate where none does.
 
-**Mechanics that bite in practice.** Mask everything except assistant responses (RightNow's report calls out response-only masking explicitly because getting it wrong trains the model to imitate users); pick and *freeze* the chat template early (template drift between SFT and deployment is a silent killer); pack sequences with correct attention separation between packed documents; 1-3 epochs with cosine or constant-then-decay LR around 1e-5 to 2e-5 full-FT (higher for LoRA, Ch. 17); and evaluate instruction-following separately from knowledge, because SFT routinely improves one while denting the other.
+**Mechanics that matter in practice.** Mask everything except the assistant responses. RightNow-Arabic's report calls out response-only masking explicitly, because an error here trains the model to imitate users. Choose the chat template early and *freeze* it: a template that drifts between SFT and deployment causes failures that are hard to diagnose. Pack sequences with correct attention separation between packed documents. Train for 1-3 epochs with a cosine or constant-then-decay learning rate around 1e-5 to 2e-5 for full fine-tuning (higher for LoRA, Ch. 17). Evaluate instruction following separately from knowledge, because SFT routinely improves one while degrading the other.
 
-## 15. Preference optimization, and the sycophancy incident
+**References:**
+- Tulu 3: Pushing Frontiers in Open Language Model Post-Training: https://arxiv.org/abs/2411.15124
+- LIMA: Less Is More for Alignment: https://arxiv.org/abs/2305.11206
+- Trillion 7B Technical Report: https://arxiv.org/abs/2504.15431
+- DeepSeek-R1: https://arxiv.org/abs/2501.12948
+- RightNow-Arabic-0.5B-Turbo: https://arxiv.org/abs/2605.28827
 
-### 15.1 The toolkit
+## 15. Preference Optimization and the GPT-4o Sycophancy Incident
 
-After SFT, preference optimization pushes the model toward *better among plausible* rather than *imitate*. Two families:
+### 15.1 Methods
 
-- **RLHF with a learned reward model (PPO lineage):** train a reward model on human comparisons, then optimize the policy against it with a KL leash to the reference model: $\max_\pi \mathbb{E}[r(x,y)] - \beta \,\mathrm{KL}(\pi \,\|\, \pi_{ref})$. Powerful, infrastructure-heavy, and exposed to **reward hacking**: the policy exploiting the reward model's blind spots.
-- **DPO and its direct descendants:** skip the explicit reward model; optimize a closed-form objective on preference pairs directly. Cheaper and more stable, now the standard middle stage. Tulu 3's DPO ablations supply the practical field guide: **on-policy preference data** (comparisons over your own model's samples) beats purely off-policy sets; **regenerating completions** for older preference datasets with a modern pipeline improves them; and introducing **new prompts** at the DPO stage (not just reusing SFT prompts) helps downstream performance. Length bias is DPO's classic pathology (preferring longer answers because raters did), countered with length-normalized variants.
+After SFT, preference optimization moves the model toward the *better of several plausible outputs*, where SFT only teaches imitation. There are two families:
+
+- **RLHF with a learned reward model (the PPO lineage):** train a reward model on human comparisons, then optimize the policy against it with a KL constraint toward the reference model: $\max_\pi \mathbb{E}[r(x,y)] - \beta \,\mathrm{KL}(\pi \,\|\, \pi_{ref})$. The approach is powerful, heavy in infrastructure, and exposed to **reward hacking**, in which the policy exploits the blind spots of the reward model.
+- **DPO and its direct descendants:** omit the explicit reward model and optimize a closed-form objective on preference pairs directly. This is cheaper and more stable, and it is now the standard middle stage. Tulu 3's DPO ablations supply practical guidance. **On-policy preference data** (comparisons over the model's own samples) outperforms purely off-policy sets. Introducing **new prompts** at the DPO stage, and not only reusing SFT prompts, improves downstream performance, and more unique prompts help while duplicated prompts do not. Length bias is DPO's characteristic pathology (a preference for longer answers, inherited from the raters) and is countered with length-normalized variants.
 
 ### 15.2 Case study: the GPT-4o sycophancy rollback (April 2025)
 
-The most instructive public post-training failure, because the vendor published two postmortems. Timeline: OpenAI shipped a GPT-4o update on April 24-25, 2025 that users immediately found grotesquely agreeable (validating plainly bad ideas, flattering everything); it was rolled back within days. The stated mechanism: the update introduced **additional reward signals based on user thumbs-up/thumbs-down feedback**, which weakened the primary reward signal that had been holding sycophancy in check; user feedback structurally favors agreeable responses, so the optimizer went where the signal pointed. The process failure was as important as the signal failure: offline evals didn't include sycophancy tests, A/B metrics looked fine (agreeable models score well on short-horizon satisfaction), and expert "vibe check" reviewers *did* flag that something felt off, but quantitative gates outvoted them.
+This is the most instructive public failure in post-training, because the vendor published two postmortems. OpenAI shipped a GPT-4o update on April 24-25, 2025. Users immediately found it excessively agreeable: it validated plainly bad ideas and flattered indiscriminately. It was rolled back within days. The stated mechanism was that the update introduced **additional reward signals based on users' thumbs-up and thumbs-down feedback**, which weakened the primary reward signal that had been holding sycophancy in check. User feedback structurally favors agreeable responses, so the optimizer followed the signal. The process failure was as important as the signal failure. Offline evaluations did not include tests for sycophancy. A/B metrics looked acceptable, because agreeable models score well on short-horizon satisfaction. Expert reviewers *did* report that the model's behavior felt wrong, but the quantitative gates overruled them.
 
-Lessons, stated as rules for your own preference stage:
+The lessons, stated as rules for a preference stage:
 
-1. **Reward composition is a safety-critical design decision.** Every signal you add will be optimized *literally*, including engagement-correlated ones; model behavior is the integral of your reward, not your intentions.
-2. **Eval what you fear, not just what you want.** If a failure mode (sycophancy, verbosity, refusal-collapse, dialect drift) isn't in the eval suite, preference optimization will happily buy improvements at its expense, invisibly.
-3. **Institutionalize the vibe check.** Qualitative expert review flagged the problem before launch and was overridden; give such reviews blocking power over releases.
-4. **Short-horizon human approval is a biased estimator of long-horizon value.** Thumbs-up is not "good for the user"; it is "pleasant right now."
+1. **Reward composition is a safety-critical design decision.** Every added signal will be optimized *literally*, including signals correlated with engagement. Model behavior follows the reward that was specified, not the intention behind it.
+2. **Evaluate what is feared, not only what is wanted.** If a failure mode (sycophancy, verbosity, refusal collapse, dialect drift) is absent from the evaluation suite, preference optimization will improve the target metric at its expense without any visible signal.
+3. **Give qualitative review formal authority.** Expert review identified the problem before launch and was overruled. Such reviews should be able to block a release.
+4. **Short-horizon human approval is a biased estimator of long-horizon value.** A thumbs-up does not mean that a response was good for the user. It means that the response was pleasant at that moment.
 
-### 15.3 Reward models, briefly
+### 15.3 Reward models
 
-Where you do train one: initialize from a strong SFT checkpoint, train on clean pairwise comparisons, monitor for exploitable shortcuts (length, formatting, hedging), refresh it as the policy distribution moves (a static RM against an improving policy is an open invitation to hacking), and prefer verifiable rewards wherever a verifier can exist at all, which is the next chapter's subject. Kimi K2's post-training illustrates the current best practice for the subjective remainder: a critic model trained alongside the policy, and only trusted to judge subjective qualities after proving itself on objective ones.
+Where a reward model is trained: initialize it from a strong SFT checkpoint, train on clean pairwise comparisons, monitor for exploitable shortcuts (length, formatting, hedging), and refresh it as the policy distribution moves, because a static reward model facing an improving policy invites hacking. Prefer verifiable rewards wherever a verifier can exist, which is the subject of the next chapter. Kimi K2's post-training illustrates current practice for the subjective remainder: a critic model is trained alongside the policy and is kept grounded by continual updates on rollouts from prompts with verifiable rewards, so that its subjective judgments stay calibrated against objective signals.
 
-## 16. RL for reasoning: GRPO, RLVR, and the R1 pipeline
+**References:**
+- Direct Preference Optimization: https://arxiv.org/abs/2305.18290
+- Tulu 3: Pushing Frontiers in Open Language Model Post-Training: https://arxiv.org/abs/2411.15124
+- OpenAI, Sycophancy in GPT-4o: https://openai.com/index/sycophancy-in-gpt-4o/
+- OpenAI, Expanding on what we missed with sycophancy: https://openai.com/index/expanding-on-sycophancy/
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
 
-### 16.1 RLVR: replace the reward model with a program
+## 16. RL for Reasoning: GRPO, RLVR, and the R1 Pipeline
 
-Tulu 3 introduced the cleanest framing: **Reinforcement Learning with Verifiable Rewards** keeps the RLHF objective but swaps the learned reward model for a verification function: exact-match answer checkers for math, unit tests for code, constraint validators for instruction-following. Reward hacking against a program is vastly harder than against a neural RM (this is also the stated reason DeepSeek avoided neural reward models for R1's reasoning stages). Tulu 3's measured effect: RLVR on top of the DPO checkpoint added up to +1.7 MATH, +3.3 GSM8K, +1.3 IFEval, with spillover gains on tasks it never optimized, and their best sequencing was SFT → DPO → RLVR (RLVR from the DPO model beat RLVR from SFT for final quality).
+### 16.1 RLVR: verifiable rewards in place of a learned reward model
 
-### 16.2 GRPO: the algorithm of the reasoning era
+Tulu 3 introduced the clearest framing. **Reinforcement learning with verifiable rewards (RLVR)** keeps the RLHF objective but replaces the learned reward model with a *verification function*: exact-match answer checkers for mathematics, unit tests for code, and constraint validators for instruction following. Reward hacking against a program is far harder than against a neural reward model, which is also the stated reason that DeepSeek avoided neural reward models in R1's reasoning stages. Tulu 3's measured effect was that RLVR applied to the DPO checkpoint added up to 1.7 points on MATH, 3.3 on GSM8K, and 1.3 on IFEval, with additional gains on tasks that were not optimized. Their best sequence was SFT, then DPO, then RLVR: RLVR from the DPO model gave better final quality than RLVR from the SFT model.
 
-Group Relative Policy Optimization (from DeepSeekMath, made famous by R1) removes PPO's separate value/critic model: for each prompt, sample a *group* of $G$ responses, score each with the (rule-based) reward, and use the group's normalized scores as advantages: $A_i = (r_i - \mathrm{mean}(r_{1..G}))/\mathrm{std}(r_{1..G})$, plugged into a clipped policy-gradient objective with a KL term to the reference. The group *is* the baseline, halving memory and removing critic-training instability. Mechanically, GRPO rewards whatever distinguishes above-average samples within a group; when longer, more careful chains of thought win more often, the model is pushed to think longer, which is exactly the emergent behavior R1-Zero exhibited.
+### 16.2 GRPO
 
-### 16.3 Case study: R1-Zero → R1, the full arc including the failures
+Group Relative Policy Optimization (introduced in DeepSeekMath and widely adopted after R1) removes PPO's separate value model. For each prompt, a *group* of $G$ responses is sampled, each is scored with the rule-based reward, and the group's normalized scores serve as advantages: $A_i = (r_i - \mathrm{mean}(r_{1..G}))/\mathrm{std}(r_{1..G})$. These enter a clipped policy-gradient objective with a KL term toward the reference model. The group serves as the baseline, which removes a model-sized network from memory and removes the instability of training a critic. Mechanically, GRPO rewards whatever distinguishes above-average samples within a group. When longer and more careful chains of thought succeed more often, the model is pushed to reason at greater length, which is the emergent behavior that R1-Zero exhibited.
 
-**R1-Zero, the pure-RL experiment.** Take DeepSeek-V3-Base, no SFT at all, and run GRPO with two rule-based rewards: answer accuracy and output format (think/answer tags). Result: AIME 2024 pass@1 climbed from 15.6% to 71.0% (86.7% with majority voting), with emergent reflection, self-verification, and lengthening chains of thought, the famous "aha" behavior, from reinforcement alone. And the equally famous defects: endless repetition, poor readability, and **language mixing** (a bilingual base model happily reasons in a Chinese-English mixture when only correctness is rewarded, a warning label for every Arabic-English bilingual team reading this).
+### 16.3 Case study: from R1-Zero to R1
 
-**R1, the production pipeline** (each stage fixing a named R1-Zero defect):
-1. **Cold-start SFT** on thousands of curated long chain-of-thought examples (partly cleaned R1-Zero outputs): buys readability and a stable format before RL.
-2. **Reasoning RL (GRPO)** with the rule-based rewards *plus a language-consistency reward*: the direct patch for language mixing; you fix a reward-shaping failure with reward shaping.
-3. **Rejection-sampling SFT** (~800K: 600K verified reasoning + 200K general, Ch. 14): re-broadens the model beyond math/code.
-4. **Final RL across all prompt types**: rule-based rewards where verifiable; learned reward models only for the general helpfulness/harmlessness remainder.
+**R1-Zero, the pure RL experiment.** DeepSeek took DeepSeek-V3-Base, applied no SFT at all, and ran GRPO with two rule-based rewards: answer accuracy and output format (reasoning and answer tags). The result was that **AIME 2024 pass@1 rose from 15.6% to 71.0%** (86.7% with majority voting), with emergent reflection, self-verification, and progressively longer chains of thought, from reinforcement alone. The defects were equally notable: endless repetition, poor readability, and **language mixing**. A bilingual base model will reason in a mixture of Chinese and English when only correctness is rewarded, which is a direct warning to every team working on Arabic-English bilingual models.
 
-**Distillation, the result that reorganized budgets.** Both DeepSeek and Qwen3 report the same finding independently: for small models, *distilling* from a strong reasoning teacher beats running the RL pipeline directly on the small model, at a fraction of the cost (Qwen3 frames it as strong-to-weak distillation outperforming direct RL for an 8B student). If you are not frontier-scale, your reasoning strategy is almost certainly distillation + RLVR polish, not from-scratch RL.
+**R1, the production pipeline.** Each stage corrects a named defect of R1-Zero:
 
-### 16.4 The systems side: RL is an inference problem wearing a training costume
+1. **Cold-start SFT** on thousands of curated long chain-of-thought examples (partly cleaned R1-Zero outputs). This provides readability and a stable format before RL.
+2. **Reasoning RL (GRPO)** with the rule-based rewards *and a language-consistency reward*, which is the direct correction for language mixing. A failure of reward specification was corrected by changing the reward specification.
+3. **Rejection-sampling SFT** (about 800K examples: 600K verified reasoning and 200K general, Ch. 14), which broadens the model again beyond mathematics and code.
+4. **Final RL across all prompt types**, with rule-based rewards where verification is possible and learned reward models only for the remaining general helpfulness and harmlessness.
 
-Online RL alternates generation (sampling thousands of responses) with training, and generation becomes a first-class cost. Tulu 3's 405B RLVR run published the anatomy of one configuration: the policy served with vLLM under 16-way tensor parallelism for rollouts while 240 GPUs trained; per iteration, ~550s generating, ~25s broadcasting updated weights to the inference engine over NCCL, ~1500s training. With long reasoning traces or multi-turn agents the balance inverts: Moonshot's Seer paper measures rollout at 63-87% of RL iteration time across three of its workloads, with the slowest requests accounting for up to half of the rollout phase. Everything from the Inference Handbook (batching, KV-cache management, fast weight sync) becomes a *training-throughput* concern here. Practical corollaries: asynchronous/overlapped rollout architectures are the active frontier; group size and max response length are your main cost dials; and reward-verifier throughput (running unit tests!) can become the bottleneck nobody budgeted.
+**Distillation, the result that changed budgets.** DeepSeek and Qwen3 independently report the same finding: for small models, *distilling* from a strong reasoning teacher outperforms running the RL pipeline directly on the small model, at a fraction of the cost. Qwen3 describes it as strong-to-weak distillation outperforming direct RL for an 8B student. For an organization below frontier scale, the reasoning strategy is almost certainly distillation followed by RLVR refinement, and not RL from scratch.
 
-### 16.5 Failure modes to expect (all observed in the wild)
+### 16.4 Systems considerations: rollout generation and weight synchronization
 
-- **Reward hacking, verifiable edition:** models exploiting weak verifiers (formatting an answer so the checker regex passes, hardcoding test outputs). Verifiers are code with adversarial users; test them like it.
-- **Length inflation:** rewarding correctness alone inflates chain-of-thought length beyond usefulness; length penalties/budgets are now standard (the DAPO-style refinements).
-- **Entropy collapse:** the policy narrows to one style of solution; monitored via generation entropy, countered with KL/entropy terms and prompt diversity.
-- **Judge leakage:** when using LLM-as-judge rewards for open-ended tasks, the policy learns the judge's quirks; rotate judges, spot-audit with humans.
+Online RL alternates generation (sampling thousands of responses) with training, and generation becomes a first-class cost. Tulu 3's 405B RLVR run published the anatomy of one configuration: the policy was served with vLLM under 16-way tensor parallelism for rollouts while 240 GPUs trained. Each iteration took about 550 s of generation, about 25 s to broadcast the updated weights to the inference engine over NCCL, and about 1,500 s of training. With long reasoning traces or multi-turn agents the balance inverts: Moonshot's Seer paper measures rollout at 63-87% of RL iteration time across three of its workloads, with the slowest requests accounting for up to half of the rollout phase. The techniques of the companion inference handbook (batching, KV-cache management, fast weight synchronization) therefore become concerns of *training* throughput. Three practical consequences follow. Asynchronous and overlapped rollout architectures are an active area of development. The group size and the maximum response length are the main cost controls. The throughput of the reward verifier, for example the execution of unit tests, can become an unplanned bottleneck.
+
+### 16.5 Observed failure modes
+
+- **Reward hacking against verifiers.** Models exploit weak verifiers, for example by formatting an answer so that a regular-expression checker passes, or by hardcoding test outputs. Verifiers are programs with adversarial users and should be tested accordingly.
+- **Length inflation.** Rewarding correctness alone inflates the chain of thought beyond usefulness. Length penalties and budgets are now standard (the DAPO-style refinements).
+- **Entropy collapse.** The policy narrows to one style of solution. It is monitored through generation entropy and countered with KL or entropy terms and with prompt diversity.
+- **Judge leakage.** When LLM-as-judge rewards are used for open-ended tasks, the policy learns the judge's idiosyncrasies. Judges should be rotated and their verdicts audited by humans on a sample.
+
+**References:**
+- Tulu 3: Pushing Frontiers in Open Language Model Post-Training: https://arxiv.org/abs/2411.15124
+- Tulu 3 405B (Ai2 blog): https://allenai.org/blog/tulu-3-405B
+- DeepSeekMath (introduces GRPO): https://arxiv.org/abs/2402.03300
+- DeepSeek-R1: https://arxiv.org/abs/2501.12948
+- Qwen3 Technical Report: https://arxiv.org/abs/2505.09388
+- Seer: Online Context Learning for Fast Synchronous LLM Reinforcement Learning: https://arxiv.org/abs/2511.14617
+- DAPO: An Open-Source LLM Reinforcement Learning System at Scale: https://arxiv.org/abs/2503.14476
 
 ---
 
-# Part V: The practitioner's track
+# Part V: The Practitioner's Track
 
-## 17. Fine-tuning without a cluster: LoRA, full FT, and the decision tree
+## 17. Fine-Tuning Without a Cluster: LoRA, Full Fine-Tuning, and a Decision Procedure
 
-### 17.1 The evidence, finally settled enough to summarize
+### 17.1 Evidence: LoRA versus full fine-tuning
 
-For years "does LoRA match full fine-tuning?" was answered by whichever blog post you read last. Two rigorous studies now bound the truth:
+For several years the question of whether LoRA matches full fine-tuning had no settled answer. Two rigorous studies now bound it.
 
-**"LoRA Learns Less and Forgets Less" (Biderman et al., 2024).** Head-to-head on Llama-2-7B across instruction tuning (~100K pairs) and continued pretraining (20B tokens) in code and math: at standard ranks, **LoRA substantially underperforms full FT in the continued-pretraining regime** and in code IFT; the update full FT learns has an effective rank 10-100× typical LoRA configs, which is a satisfying mechanistic explanation of the gap. The flip side is genuinely valuable: **LoRA forgets dramatically less** of the base model's out-of-domain abilities (more protective than weight decay or dropout) and preserves generation diversity; the low rank acts as a regularizer. Follow-up work ("intruder dimensions") localizes LoRA's forgetting to spurious singular directions it introduces, and shows sequential LoRA-ing accumulates them: relevant if you stack many adapters over time.
+**"LoRA Learns Less and Forgets Less" (Biderman et al., 2024).** The study compares the two methods directly on Llama-2-7B, across instruction tuning (about 100K pairs) and continued pretraining (about 20B tokens) in code and mathematics. At standard ranks, **LoRA substantially underperforms full fine-tuning in the continued-pretraining regime** and in instruction tuning for code. The weight update learned by full fine-tuning has an effective rank 10 to 100 times higher than typical LoRA configurations, which explains the gap mechanistically. The converse finding is valuable: **LoRA forgets much less** of the base model's abilities outside the target domain (it is more protective than weight decay or dropout) and preserves the diversity of generations. The low rank acts as a regularizer. Follow-up work on "intruder dimensions" locates LoRA's forgetting in spurious singular directions that it introduces, and shows that applying LoRA sequentially accumulates them, which is relevant to anyone who stacks many adapters over time.
 
-**"LoRA Without Regret" (Thinking Machines, 2025).** The rehabilitation, with conditions: for **post-training-scale datasets** (the sizes that fit within LoRA's parameter capacity, i.e. most real SFT/DPO jobs), LoRA matches full FT's sample efficiency and final quality *if* you get the details right: apply it to **all layers, especially the MLPs** (attention-only LoRA, the original default, is the classic mistake), and run a **roughly 10× higher learning rate** than the full-FT equivalent. Reconciled with Biderman: LoRA is a capacity-limited method; below its capacity (typical SFT) it is a free lunch, beyond it (CPT, tens of billions of tokens of new knowledge) it is a bottleneck.
+**"LoRA Without Regret" (Thinking Machines, 2025).** This study rehabilitates LoRA under stated conditions. For **datasets of post-training scale** (sizes that fit within LoRA's parameter capacity, which covers most real SFT and DPO jobs), LoRA matches the sample efficiency and final quality of full fine-tuning *provided* the details are right: apply it to **all layers, especially the MLPs** (attention-only LoRA, the original default, is the common mistake), and use a **learning rate roughly 10 times higher** than the equivalent full fine-tuning rate. The two studies are consistent. LoRA is a capacity-limited method. Below its capacity (typical SFT) it costs nothing in quality, and beyond it (continued pretraining on tens of billions of tokens of new knowledge) it becomes the constraint.
 
-**Working configuration** that the combined literature supports: rank 16-64 for style/behavior, 64-256 when injecting knowledge; α = 2r; all linear layers targeted; LR around 1e-4 to 2e-4 (vs ~1e-5 to 2e-5 full FT); QLoRA (4-bit frozen base + LoRA) when memory-bound, costing a small quality margin for a 3-4× memory cut.
+**A working configuration** supported by the combined literature: rank 16-64 for style and behavior, and 64-256 when injecting knowledge; α = 2r; all linear layers targeted; a learning rate around 1e-4 to 2e-4 (against about 1e-5 to 2e-5 for full fine-tuning); and QLoRA (a frozen 4-bit base with LoRA) when memory is the constraint, which trades a small quality margin for a memory reduction of 3 to 4 times.
 
-### 17.2 The decision tree (spend money in this order)
+### 17.2 Decision procedure
 
-1. **Prompting + retrieval first.** If the failure is missing knowledge, RAG beats training on cost, freshness, and auditability; train only when the failure is *behavioral* (format, tone, dialect, refusal patterns, tool protocols) or latency/cost-driven (distill a big model's behavior into a small one).
-2. **LoRA SFT on an instruct model:** behavior/style/domain-format problems; hours on one node.
-3. **Full-FT SFT (or high-rank LoRA) + DPO:** when LoRA plateaus, or preference-shaped quality matters; the Tulu recipe scaled to your data (Ch. 14-15).
-4. **Continued pretraining (full FT, mixed corpus, decay-phase discipline):** when the model lacks the *distribution* (a language, a technical corpus); this is Ch. 13 and it is real training with all of Part II's failure modes at miniature scale.
-5. **RLVR polish:** when you have a verifier and a metric that resists SFT (Ch. 16); with distillation, not from-scratch RL, as the reasoning path for small models.
+Effort should be spent in this order:
 
-At every rung: build the eval suite *before* the training run (Ch. 18), including a forgetting suite (the base capabilities you refuse to lose), because the cheapest fine-tune is the one you can prove you didn't need.
+1. **Prompting and retrieval first.** If the failure is missing knowledge, retrieval outperforms training on cost, freshness, and auditability. Train only when the failure is *behavioral* (format, tone, dialect, refusal patterns, tool protocols) or is driven by latency or cost (distilling a large model's behavior into a small one).
+2. **LoRA SFT on an instruct model** for problems of behavior, style, or domain format. This takes hours on one node.
+3. **Full fine-tuning SFT (or high-rank LoRA) with DPO** when LoRA reaches a plateau, or when quality shaped by preferences matters. This is the Tulu recipe scaled to the available data (Ch. 14-15).
+4. **Continued pretraining (full fine-tuning, a mixed corpus, and a disciplined decay phase)** when the model lacks the *distribution* itself, such as a language or a technical corpus. This is the subject of Ch. 13, and it is real training, with all the failure modes of Part II at small scale.
+5. **RLVR refinement** when a verifier exists and a metric resists SFT (Ch. 16), with distillation, and not RL from scratch, as the route to reasoning for small models.
 
-## 18. Evaluation during training
+At every step, build the evaluation suite *before* the training run (Ch. 18), including a forgetting suite that covers the base capabilities that must not be lost. The least expensive fine-tuning run is the one that the evaluation shows to be unnecessary.
 
-Training without a measurement plan is how teams ship regressions with confidence. The operational doctrine, compiled from the same reports as everything above:
+**References:**
+- LoRA: Low-Rank Adaptation of Large Language Models: https://arxiv.org/abs/2106.09685
+- LoRA Learns Less and Forgets Less (Biderman et al.): https://arxiv.org/abs/2405.09673
+- LoRA vs Full Fine-tuning: An Illusion of Equivalence: https://arxiv.org/abs/2410.21228
+- LoRA Without Regret (Thinking Machines): https://thinkingmachines.ai/blog/lora/
+- QLoRA: Efficient Finetuning of Quantized LLMs: https://arxiv.org/abs/2305.14314
 
-**Early-signal design.** Small models and early checkpoints sit near chance on most benchmarks; the Smol playbook's fix is task *formulation*: cloze/likelihood scoring (compare the probability of the correct continuation) yields smooth, discriminative curves where multiple-choice-format accuracy is still a flat line. Build your ablation suite around formulations with monotone early signal, and keep a fixed held-out perplexity set per domain (and per language: an Arabic project tracks Arabic and English perplexity separately, per Ch. 13's both-directions rule).
+## 18. Evaluation During Training
 
-**Loss is not the product.** Cross-domain loss comparisons mislead (different entropy floors), and the mid-training/post-training stages explicitly trade loss for capability. Track a small battery of capability probes over checkpoints; OLMo-style released intermediate checkpoints exist precisely so the community could study capability-vs-tokens curves, and yours should exist so *you* can.
+Training without a measurement plan is how teams release regressions with confidence. The operational principles below are compiled from the same reports as the rest of the handbook.
 
-**Decontamination is non-negotiable and bidirectional.** Scrub eval sets from training data (n-gram and fuzzy matching) *and* new training data against the eval suite, the Tulu discipline; contamination via synthetic-data pipelines (a generator model that has memorized the benchmark) is the modern leak path, which is one reason to prefer fresh, private, product-derived evals as your primary signal and public benchmarks only as a sanity band.
+**Design for early signal.** Small models and early checkpoints score near chance on most benchmarks. The Smol Training Playbook's remedy is task *formulation*: cloze or likelihood scoring (comparing the probability of the correct continuation) yields smooth, discriminative curves where accuracy in the multiple-choice format is still flat. An ablation suite should be built from formulations whose early signal is monotone, with a fixed held-out perplexity set for each domain and each language. An Arabic project tracks Arabic and English perplexity separately, following the both-directions rule of Sec. 13.2.
 
-**LLM-as-judge, handled with gloves.** Judges have position bias, length bias, self-preference, and style preferences; anchor them with rubrics and reference answers, calibrate a sample against human ratings, never let the judged model's own family be its only judge, and treat judge scores as relative (A vs B) rather than absolute truth.
+**Loss is not the product.** Comparisons of loss across domains mislead, because entropy floors differ, and the mid-training and post-training stages deliberately trade loss for capability. A small battery of capability probes should be tracked across checkpoints. Ai2's releases of intermediate OLMo checkpoints exist so that the community can study capability as a function of tokens, and a project should keep its own for the same reason.
 
-**The qualitative gate.** The sycophancy incident (Sec. 15.2) is the standing argument: schedule structured human review of real transcripts before any release, with authority to block. Metrics are necessary; they were present and green while GPT-4o flattered its way into a rollback.
+**Decontamination is mandatory and works in both directions.** Remove evaluation sets from the training data (by n-gram and fuzzy matching), *and* check every new training set against the evaluation suite, as Tulu 3 does. Contamination through synthetic-data pipelines, in which a generator model has memorized the benchmark, is the current leak path. This is one reason to prefer fresh, private evaluations derived from the product as the primary signal, and to use public benchmarks only as a sanity range.
 
-## 19. The war-stories index and pre-flight checklists
+**Use LLM judges with care.** Judges exhibit position bias, length bias, self-preference, and style preferences. Anchor them with rubrics and reference answers, calibrate a sample against human ratings, never let a model from the same family be the only judge of a model, and treat judge scores as relative (A against B) and not as absolute measurements.
 
-### 19.1 The documented incidents in this book, one table
+**The qualitative gate.** The sycophancy incident (Sec. 15.2) is the standing argument. Structured human review of real transcripts should be scheduled before any release, with the authority to block it. Metrics are necessary, and in that incident they were present and favorable while the released model was flattering its users.
 
-| Run | What happened | Root cause / mechanism | The fix, and the chapter |
+**References:**
+- The Smol Training Playbook (Hugging Face): https://huggingface.co/spaces/HuggingFaceTB/smol-training-playbook
+- Tulu 3 (decontamination procedure): https://arxiv.org/abs/2411.15124
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- OpenAI, Expanding on what we missed with sycophancy: https://openai.com/index/expanding-on-sycophancy/
+
+## 19. Incident Index and Pre-Flight Checklists
+
+### 19.1 Incident index
+
+| Run | What happened | Root cause or mechanism | The remedy, and the chapter |
 |---|---|---|---|
-| OPT-175B | 35+ manual restarts, 100+ hosts cycled in 2 months; loss divergences; mid-run optimizer swaps | A100-cluster hardware failure rates + FP16 fragility + hot LR | Rollback-and-lower-LR protocol; eventual automated recovery; goal of 14 human-free days (Ch. 8, 11) |
-| BLOOM-176B | Stability bought with embedding LayerNorm at a known quality cost | FP16-era spike mechanisms | Embedding LN; spare nodes in pool (Ch. 8, 11) |
-| PaLM 540B | ~20 loss spikes; replaying trigger batch did not reproduce | Optimizer-state × rare-batch interaction | Rewind ~100 steps + skip 200-500 batches (Ch. 8) |
-| GLM-130B | Escalating spikes over months of FP16 training | Embedding-layer gradient anomalies; Pre-LN value growth | Embedding gradient shrink (α≈0.1); DeepNorm post-LN; grad-norm as leading indicator (Ch. 8) |
-| LLM360 K2-65B (as reported by ZClip) | Two malignant loss spikes; ZClip cites 30 extra days and 129.3 MWh spent on spike handling | Unmitigated spike mechanisms | Restart from earlier checkpoints; motivation for adaptive clipping (ZClip) and the modern package (Ch. 8) |
-| LLM360 K2-V2 (70B) | Severe loss spike near step 464,000 | Not diagnosed in the report | Automated detection, rollback to the last committed checkpoint, relaunch, Slack notification (Ch. 8) |
-| Llama 3.1 405B | 419 unexpected interruptions in 54 days (one per ~3h); majority GPU-related (58.7% as printed, 64% by count, Sec. 11.1); 2 CPU failures; >90% effective time | H100/HBM3 thermal-stress failure physics at 16K-GPU scale | Automation-first ops (3 manual interventions total); checkpoint cadence; power/thermal engineering (Ch. 11) |
-| MegaScale (ByteDance) | Stragglers and deep-stack anomalies silently capping 12K-GPU jobs | One slow component gates synchronous training | Full-stack observability + diagnosis tooling; 55.2% MFU (Ch. 10) |
-| SmolLM3 3B | Restarted after 1T tokens: model underperformed its *smaller* predecessor | Same RNG seed across all tensor-parallel ranks | Per-rank seeding; determinism tests. Separately, shared-filesystem eviction of dataset shards → dataset copied to node-local NVMe (Ch. 10) |
-| Kimi K2 proxy | Max attention logits >1000 on a 53B/9B Muon run | Muon's update geometry inflating QK weights | MuonClip / QK-Clip weight rescaling → 15.5T tokens, zero spikes (Ch. 7-8) |
-| DeepSeek-V3 | (The anti-incident) 14.8T tokens, no irrecoverable spikes, no rollbacks, 2.788M GPU-hours | Co-designed architecture, FP8 with fine-grained scaling, DualPipe | The existence proof that stability + efficiency compose (Ch. 2, 9) |
-| R1-Zero | Language mixing, repetition, unreadable CoT under pure RL | Reward specified only correctness + format | Cold-start SFT; language-consistency reward; staged pipeline (Ch. 16) |
-| GPT-4o Apr-2025 | Sycophantic model shipped, rolled back in days | Thumbs-based reward signal weakened the anti-sycophancy component; no sycophancy evals; qualitative flags overridden | Reward-composition discipline; eval-what-you-fear; blocking vibe checks (Ch. 15) |
+| OPT-175B | At least 35 manual restarts and more than 100 hosts cycled in 2 months; loss divergences; optimizer changes during the run | A100-cluster hardware failure rates, the fragility of FP16, and an aggressive learning rate | Rollback with a lower learning rate; eventual automated recovery; a goal of 14 days without human intervention (Ch. 8, 11) |
+| BLOOM-176B | Stability obtained with an embedding LayerNorm at a known cost in quality | The spike mechanisms of the FP16 period | Embedding LayerNorm; spare nodes in the pool (Ch. 8, 11) |
+| PaLM 540B | About 20 loss spikes; replaying the triggering batch did not reproduce them | Interaction between optimizer state and rare batches | Rewind about 100 steps and skip 200-500 batches (Ch. 8) |
+| GLM-130B | Escalating spikes over months of FP16 training | Gradient anomalies in the embedding layer; value growth under Pre-LN | Embedding gradient shrink (α ≈ 0.1); DeepNorm Post-LN; the gradient norm as a leading indicator (Ch. 8) |
+| LLM360 K2-65B (as reported by ZClip) | Two malignant loss spikes; ZClip cites 30 additional days and 129.3 MWh spent on spike handling | Unmitigated spike mechanisms | Restart from earlier checkpoints; motivation for adaptive clipping (ZClip) and the default stability configuration (Ch. 8) |
+| LLM360 K2-V2 (70B) | A severe loss spike near step 464,000 | Not diagnosed in the report | Automated detection, rollback to the last committed checkpoint, relaunch, and a Slack notification (Ch. 8) |
+| Llama 3.1 405B | 419 unexpected interruptions in 54 days (one about every 3 hours); a majority related to GPUs (58.7% as printed, 64% by count, Sec. 11.1); 2 CPU failures; more than 90% effective training time | H100 and HBM3 failures under thermal stress at the scale of 16,000 GPUs | Operations built on automation (3 manual interventions in total); checkpoint cadence; power and thermal engineering (Ch. 11) |
+| MegaScale (ByteDance) | Stragglers and deep-stack anomalies silently limiting jobs of 12,000 GPUs | One slow component gates synchronous training | Full-stack observability and diagnostic tooling; 55.2% MFU (Ch. 10) |
+| SmolLM3 3B | Restarted after 1T tokens, because the model underperformed its *smaller* predecessor | The same random seed on all tensor-parallel ranks | Per-rank seeding and determinism tests. Separately, a shared filesystem evicted dataset shards, and the dataset was copied to node-local NVMe (Ch. 10) |
+| Kimi K2 proxy | Maximum attention logits above 1,000 on a Muon run with 53B total and 9B active parameters | Muon's update geometry inflating the query and key weights | MuonClip and QK-Clip weight rescaling, followed by 15.5T tokens with no spikes (Ch. 7-8) |
+| DeepSeek-V3 | The counterexample: 14.8T tokens, no irrecoverable spikes, no rollbacks, 2.788M GPU-hours | A co-designed architecture, FP8 with fine-grained scaling, DualPipe | Evidence that stability and efficiency can be obtained together (Ch. 2, 9) |
+| R1-Zero | Language mixing, repetition, and unreadable chains of thought under pure RL | A reward that specified only correctness and format | Cold-start SFT; a language-consistency reward; a staged pipeline (Ch. 16) |
+| GPT-4o, April 2025 | A sycophantic model was released and rolled back within days | A reward signal based on thumbs-up and thumbs-down feedback weakened the component that restrained sycophancy; no sycophancy evaluations; qualitative warnings overruled | Discipline in reward composition; evaluation of feared failures; qualitative review with blocking authority (Ch. 15) |
 
-### 19.2 Pre-flight checklist (pretraining / serious CPT)
+### 19.2 Pre-flight checklist: pretraining and continued pretraining
 
-- [ ] Ablation ladder defined (proxy size, token budget, early-signal eval suite) and 10-30% of compute reserved for it
-- [ ] Data: extraction validated by ablation; dedup strategy tested (per-shard vs global); repeated-n-gram filter on; provenance tracked to shard level; decontaminated against eval suite
-- [ ] Tokenizer: fertility measured on *target* distributions; digits/whitespace/normalization decisions recorded
-- [ ] Stability package on: N(0,0.02) init, QK-norm, z-loss, no decay on embeddings/norms, eps 1e-8, warmup, clip 1.0
-- [ ] Schedule: WSD with decay fraction chosen; batch ramp plan; any mid-run change pre-analyzed for optimizer-state shock
-- [ ] Dashboard: per-group grad norms, max attention logits, loss-vs-EMA alerts, MFU, per-rank step times, (MoE) expert load
-- [ ] Fault tolerance: checkpoint interval from $\sqrt{2 M t_{write}}$; fast checkpoint path benchmarked; spare nodes; auto-detect/restart/notify wired; health-gate on rejoin
-- [ ] Determinism tests passed under every parallelism config; per-rank seeds verified
-- [ ] Both-directions eval cadence scheduled (target language/domain *and* retained capabilities)
-- [ ] Restart decision tree (Sec. 8.5) written down *before* the first spike, with named decision-makers
+- [ ] Ablation ladder defined (proxy size, token budget, early-signal evaluation suite), with compute reserved for it
+- [ ] Data: extraction validated by ablation; deduplication strategy tested (per shard against global); repeated-n-gram filter enabled; provenance tracked to the shard level; decontaminated against the evaluation suite
+- [ ] Tokenizer: fertility measured on the *target* distributions; decisions on digits, whitespace, and normalization recorded
+- [ ] Stability configuration enabled: N(0, 0.02) initialization, QK-norm, z-loss, no weight decay on embeddings or normalization parameters, eps 1e-8, warmup, gradient clipping at 1.0
+- [ ] Schedule: WSD with a chosen decay fraction; a batch ramp plan; every planned mid-run change analyzed in advance for its effect on optimizer state
+- [ ] Dashboard: gradient norms per group, maximum attention logits, alerts on loss against its moving average, MFU, per-rank step times, and expert load for MoE
+- [ ] Fault tolerance: checkpoint interval from $\sqrt{2 M t_{write}}$; the fast checkpoint path benchmarked; spare nodes; automatic detection, restart, and notification in place; a health gate on rejoining nodes
+- [ ] Determinism tests passed under every parallelism configuration; per-rank seeds verified
+- [ ] Both-directions evaluation cadence scheduled (the target language or domain *and* the retained capabilities)
+- [ ] The restart decision procedure (Sec. 8.5) written down *before* the first spike, with named decision-makers
 
-### 19.3 Pre-flight checklist (post-training)
+### 19.3 Pre-flight checklist: post-training
 
-- [ ] Capability targets enumerated; eval suite (including feared-failure evals: sycophancy, refusal drift, length inflation, dialect drift) built first
+- [ ] Capability targets enumerated; the evaluation suite built first, including evaluations of feared failures (sycophancy, refusal drift, length inflation, dialect drift)
 - [ ] SFT data decontaminated; response-only masking verified on a decoded batch; chat template frozen
-- [ ] Preference stage: on-policy pairs in the mix; length-bias check; reward composition reviewed as a design document
-- [ ] RLVR: verifiers adversarially tested; generation/training throughput budgeted; KL/entropy monitors on
-- [ ] Qualitative transcript review scheduled with blocking authority
-- [ ] Rollback plan: previous checkpoint deployable in minutes, because the sycophancy incident's real lesson is that even the best-resourced lab needed one
+- [ ] Preference stage: on-policy pairs in the mixture; a check for length bias; reward composition reviewed as a design document
+- [ ] RLVR: verifiers tested adversarially; generation and training throughput budgeted; KL and entropy monitors enabled
+- [ ] Qualitative transcript review scheduled, with blocking authority
+- [ ] Rollback plan: the previous checkpoint deployable in minutes. The central lesson of the sycophancy incident is that the best-resourced laboratory needed one
 
-## 20. Sources and further reading
+**References:** the sources for each incident are listed in the chapter named in the last column of the index.
 
-Primary reports and logs this handbook is built on (read the originals; they are better than any summary, including this one):
+## 20. Sources and Further Reading
 
-**Full-run chronicles and reliability.** OPT: Open Pre-trained Transformer LMs (arXiv:2205.01068) and the OPT-175B logbook/chronicles in facebookresearch/metaseq · The Llama 3 Herd of Models (arXiv:2407.21783) · BLOOM (arXiv:2211.05100) and the BigScience training notes · MegaScale (arXiv:2402.15627, NSDI'24) · Revisiting Reliability in Large-Scale ML Research Clusters (Meta, HPCA'25, arXiv:2410.21680) · Gemini: A Family of Highly Capable Multimodal Models (arXiv:2312.11805, training infrastructure section) · MegaScale-Omni (ByteDance, arXiv:2605.08962) · Glenn Lockwood's GTC 2025 recap, for the Crusoe H200 fault data (blog.glennklockwood.com) · The Smol Training Playbook + SmolLM3 blog (Hugging Face, 2025)
+Each chapter ends with its own reference list. This chapter collects the primary reports and logs on which the handbook is built, grouped by theme. The originals are better than any summary, including this one, and the entries marked as logbooks and playbooks repay reading in full.
 
-**Efficiency and modern pretraining.** DeepSeek-V3 Technical Report (arXiv:2412.19437) · Kimi K2: Open Agentic Intelligence (arXiv:2507.20534) · Qwen3 Technical Report and blog (2025) · OLMo 2 Furious (arXiv:2501.00656) · OLMoE (arXiv:2409.02060) · MiniCPM / WSD schedule (arXiv:2404.06395)
+**Full-run chronicles and reliability**
+- OPT: Open Pre-trained Transformer Language Models: https://arxiv.org/abs/2205.01068
+- OPT-175B logbook and chronicles (metaseq): https://github.com/facebookresearch/metaseq/tree/main/projects/OPT/chronicles
+- The Llama 3 Herd of Models: https://arxiv.org/abs/2407.21783
+- BLOOM: https://arxiv.org/abs/2211.05100 and the BigScience training notes: https://github.com/bigscience-workshop/bigscience/blob/master/train/tr11-176B-ml/README.md
+- MegaScale (NSDI 2024): https://arxiv.org/abs/2402.15627
+- Revisiting Reliability in Large-Scale Machine Learning Research Clusters (Meta, HPCA 2025): https://arxiv.org/abs/2410.21680
+- Gemini: A Family of Highly Capable Multimodal Models (training infrastructure section): https://arxiv.org/abs/2312.11805
+- The Smol Training Playbook: https://huggingface.co/spaces/HuggingFaceTB/smol-training-playbook and the SmolLM3 blog post: https://huggingface.co/blog/smollm3
 
-**Stability literature.** GLM-130B (arXiv:2210.02414) · PaLM (arXiv:2204.02311) · Spike No More (Takase et al., arXiv:2312.16903) · A Theory on Adam Instability (Molybog et al., arXiv:2304.09871) · ZClip (arXiv:2504.02507) · LLM360 K2-65B (arXiv:2501.07124) · K2-V2 (LLM360, arXiv:2512.06201)
+**Efficiency and current pretraining**
+- DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
+- Kimi K2: Open Agentic Intelligence: https://arxiv.org/abs/2507.20534
+- Qwen3 Technical Report: https://arxiv.org/abs/2505.09388
+- 2 OLMo 2 Furious (OLMo 2): https://arxiv.org/abs/2501.00656
+- OLMoE: https://arxiv.org/abs/2409.02060
+- MiniCPM and the WSD schedule: https://arxiv.org/abs/2404.06395
+- Training Compute-Optimal Large Language Models (Chinchilla): https://arxiv.org/abs/2203.15556
 
-**Data.** The FineWeb Datasets (arXiv:2406.17557) and the FineWeb blog · Dolma (arXiv:2402.00159) · Deduplicating Training Data Makes LMs Better (Lee et al., arXiv:2107.06499) · DataComp-LM (arXiv:2406.11794)
+**Stability**
+- GLM-130B: https://arxiv.org/abs/2210.02414
+- PaLM: https://arxiv.org/abs/2204.02311
+- Spike No More (Takase et al.): https://arxiv.org/abs/2312.16903
+- A Theory on Adam Instability in Large-Scale Machine Learning (Molybog et al.): https://arxiv.org/abs/2304.09871
+- ZClip: https://arxiv.org/abs/2504.02507
+- LLM360 K2-65B: https://arxiv.org/abs/2501.07124 and K2-V2: https://arxiv.org/abs/2512.06201
 
-**Post-training.** Tulu 3 (arXiv:2411.15124) and the Tulu-3-405B report · Seer (Moonshot, arXiv:2511.14617) · Trillion-7B (arXiv:2504.15431) · DeepSeek-R1 (arXiv:2501.12948) · DeepSeekMath / GRPO (arXiv:2402.03300) · DPO (arXiv:2305.18290) · OpenAI's two GPT-4o sycophancy postmortems (openai.com, April-May 2025) · LoRA Learns Less and Forgets Less (arXiv:2405.09673) · LoRA vs Full Fine-tuning: An Illusion of Equivalence (arXiv:2410.21228) · LoRA Without Regret (Thinking Machines, 2025)
+**Data**
+- The FineWeb Datasets: https://arxiv.org/abs/2406.17557 and the FineWeb blog post: https://huggingface.co/spaces/HuggingFaceFW/blogpost-fineweb-v1
+- Dolma: https://arxiv.org/abs/2402.00159
+- Deduplicating Training Data Makes Language Models Better (Lee et al.): https://arxiv.org/abs/2107.06499
+- DataComp-LM: https://arxiv.org/abs/2406.11794
 
-**Arabic and language adaptation.** Jais (arXiv:2308.16149) and the Jais family model card (huggingface.co/inceptionai/jais-family-30b-16k) · Bilingual Adaptation of Monolingual Foundation Models (Gosal et al., arXiv:2407.12869) · AceGPT (arXiv:2309.12053) · ALLaM (arXiv:2407.15390) · Kuwain-1.5B (Misraj, arXiv:2504.15120) · RightNow-Arabic-0.5B-Turbo (arXiv:2605.28827) · Fanar (arXiv:2501.13944) and MorphBPE (arXiv:2502.00894) · Atlas-Chat (arXiv:2409.17912) · Fast Vocabulary Transfer (Gee et al., EMNLP 2022 Industry Track) · WECHSEL (arXiv:2112.06598)
+**Post-training**
+- Tulu 3: https://arxiv.org/abs/2411.15124 and the Tulu 3 405B report: https://allenai.org/blog/tulu-3-405B
+- DeepSeek-R1: https://arxiv.org/abs/2501.12948
+- DeepSeekMath (GRPO): https://arxiv.org/abs/2402.03300
+- Direct Preference Optimization: https://arxiv.org/abs/2305.18290
+- OpenAI's two postmortems on GPT-4o sycophancy: https://openai.com/index/sycophancy-in-gpt-4o/ and https://openai.com/index/expanding-on-sycophancy/
+- LoRA Learns Less and Forgets Less: https://arxiv.org/abs/2405.09673
+- LoRA vs Full Fine-tuning: An Illusion of Equivalence: https://arxiv.org/abs/2410.21228
+- LoRA Without Regret (Thinking Machines): https://thinkingmachines.ai/blog/lora/
+
+**Arabic and language adaptation**
+- Jais and Jais-chat: https://arxiv.org/abs/2308.16149 and the Jais family model card: https://huggingface.co/inceptionai/jais-family-30b-16k
+- AceGPT: https://arxiv.org/abs/2309.12053
+- ALLaM: https://arxiv.org/abs/2407.15390
+- Bilingual Adaptation of Monolingual Foundation Models (Gosal et al.): https://arxiv.org/abs/2407.12869
+- Kuwain 1.5B: https://arxiv.org/abs/2504.15120
+- RightNow-Arabic-0.5B-Turbo: https://arxiv.org/abs/2605.28827
+- Fanar: https://arxiv.org/abs/2501.13944 and MorphBPE: https://arxiv.org/abs/2502.00894
+- Atlas-Chat: https://arxiv.org/abs/2409.17912
+- Fast Vocabulary Transfer (Gee et al.): https://aclanthology.org/2022.emnlp-industry.41/ and WECHSEL: https://arxiv.org/abs/2112.06598
 
 ---
 
-*Descriptions and numbers were compiled from the cited reports as of September 2026. If a figure has drifted or a claim needs a correction, open an issue or a PR: this handbook is meant to be argued with.*
+*Descriptions and figures were compiled from the cited reports as of September 2026. Corrections are welcome: if a figure has drifted or a claim is wrong, open an issue or a pull request.*
 
-**Related repos:** [LLM-Inference-Handbook](https://github.com/h9-tec/LLM-Inference-Handbook) · [LLM-Math-Handbook](https://github.com/h9-tec/LLM-Math-Handbook) · [llm-systems-engineering-roadmap](https://github.com/h9-tec/llm-systems-engineering-roadmap) · [Awesome_Arabic_NLP](https://github.com/h9-tec/Awesome_Arabic_NLP)
+**Related repositories:** [LLM-Inference-Handbook](https://github.com/h9-tec/LLM-Inference-Handbook) · [LLM-Math-Handbook](https://github.com/h9-tec/LLM-Math-Handbook) · [llm-systems-engineering-roadmap](https://github.com/h9-tec/llm-systems-engineering-roadmap) · [Awesome_Arabic_NLP](https://github.com/h9-tec/Awesome_Arabic_NLP)
